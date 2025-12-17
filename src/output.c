@@ -638,7 +638,7 @@ handle_new_output(struct wl_listener *listener, void *data)
 	wlr_output->data = output;
 	output->server = server;
 	output->id_bit = id_bit;
-	output->hdr_mode = LAB_HDR_AUTO;  /* Default, will be set in configure_new_output */
+	output->hdr_mode = LAB_HDR_DISABLED;  /* Default to disabled, will be set in configure_new_output */
 	output_state_init(output);
 
 	wl_list_insert(&server->outputs, &output->link);

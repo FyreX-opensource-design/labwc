@@ -235,7 +235,7 @@ fill_output_hdr_config(xmlNode *node)
 {
 	struct output_hdr_config *hdr_config = znew(*hdr_config);
 	wl_list_append(&rc.output_hdr_configs, &hdr_config->link);
-	hdr_config->hdr = LAB_HDR_AUTO;  /* Default */
+	hdr_config->hdr = LAB_HDR_DISABLED;  /* Default to disabled if enabled attribute not specified */
 
 	/* Try both attributes and child nodes for compatibility */
 	xmlChar *output_attr = xmlGetProp(node, (xmlChar *)"output");
@@ -1512,7 +1512,7 @@ rcxml_init(void)
 
 	rc.gap = 0;
 	rc.adaptive_sync = LAB_ADAPTIVE_SYNC_DISABLED;
-	rc.hdr = LAB_HDR_AUTO;
+	rc.hdr = LAB_HDR_DISABLED;  /* Default to disabled if not configured */
 	rc.allow_tearing = LAB_TEARING_DISABLED;
 	rc.auto_enable_outputs = true;
 	rc.reuse_output_mode = false;
