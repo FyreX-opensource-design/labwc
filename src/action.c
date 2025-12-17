@@ -17,6 +17,7 @@
 #include "common/parse-bool.h"
 #include "common/spawn.h"
 #include "common/string-helpers.h"
+#include "config/keybind.h"
 #include "config/rcxml.h"
 #include "cycle.h"
 #include "debug.h"
@@ -135,6 +136,9 @@ enum action_type {
 	ACTION_TYPE_ZOOM_OUT,
 	ACTION_TYPE_WARP_CURSOR,
 	ACTION_TYPE_HIDE_CURSOR,
+	ACTION_TYPE_ENABLE_KEYBIND,
+	ACTION_TYPE_DISABLE_KEYBIND,
+	ACTION_TYPE_TOGGLE_KEYBIND,
 };
 
 const char *action_names[] = {
@@ -204,6 +208,9 @@ const char *action_names[] = {
 	"ZoomOut",
 	"WarpCursor",
 	"HideCursor",
+	"EnableKeybind",
+	"DisableKeybind",
+	"ToggleKeybind",
 	NULL
 };
 
@@ -1558,6 +1565,64 @@ run_action(struct view *view, struct server *server, struct action *action,
 	case ACTION_TYPE_HIDE_CURSOR:
 		cursor_set_visible(&server->seat, false);
 		break;
+	case ACTION_TYPE_ENABLE_KEYBIND: {
+		const char *id = action_get_str(action, "id", NULL);
+		if (!id) {
+			wlr_log(WLR_ERROR, "EnableKeybind action requires 'id' parameter");
+			break;
+		}
+		struct keybind *keybind = keybind_find_by_id(id);
+		if (!keybind) {
+			wlr_log(WLR_ERROR, "Keybind with id '%s' not found", id);
+			break;
+		}
+		if (!keybind->toggleable) {
+			wlr_log(WLR_ERROR, "Keybind with id '%s' is not toggleable", id);
+			break;
+		}
+		keybind->enabled = true;
+		wlr_log(WLR_INFO, "Enabled keybind with id '%s'", id);
+		break;
+	}
+	case ACTION_TYPE_DISABLE_KEYBIND: {
+		const char *id = action_get_str(action, "id", NULL);
+		if (!id) {
+			wlr_log(WLR_ERROR, "DisableKeybind action requires 'id' parameter");
+			break;
+		}
+		struct keybind *keybind = keybind_find_by_id(id);
+		if (!keybind) {
+			wlr_log(WLR_ERROR, "Keybind with id '%s' not found", id);
+			break;
+		}
+		if (!keybind->toggleable) {
+			wlr_log(WLR_ERROR, "Keybind with id '%s' is not toggleable", id);
+			break;
+		}
+		keybind->enabled = false;
+		wlr_log(WLR_INFO, "Disabled keybind with id '%s'", id);
+		break;
+	}
+	case ACTION_TYPE_TOGGLE_KEYBIND: {
+		const char *id = action_get_str(action, "id", NULL);
+		if (!id) {
+			wlr_log(WLR_ERROR, "ToggleKeybind action requires 'id' parameter");
+			break;
+		}
+		struct keybind *keybind = keybind_find_by_id(id);
+		if (!keybind) {
+			wlr_log(WLR_ERROR, "Keybind with id '%s' not found", id);
+			break;
+		}
+		if (!keybind->toggleable) {
+			wlr_log(WLR_ERROR, "Keybind with id '%s' is not toggleable", id);
+			break;
+		}
+		keybind->enabled = !keybind->enabled;
+		wlr_log(WLR_INFO, "%s keybind with id '%s'",
+			keybind->enabled ? "Enabled" : "Disabled", id);
+		break;
+	}
 	case ACTION_TYPE_INVALID:
 		wlr_log(WLR_ERROR, "Not executing unknown action");
 		break;

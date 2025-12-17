@@ -139,6 +139,21 @@ keybind_update_keycodes(struct server *server)
 }
 
 struct keybind *
+keybind_find_by_id(const char *id)
+{
+	if (!id) {
+		return NULL;
+	}
+	struct keybind *keybind;
+	wl_list_for_each(keybind, &rc.keybinds, link) {
+		if (keybind->id && !strcmp(keybind->id, id)) {
+			return keybind;
+		}
+	}
+	return NULL;
+}
+
+struct keybind *
 keybind_create(const char *keybind)
 {
 	xkb_keysym_t sym;
@@ -209,6 +224,9 @@ keybind_create(const char *keybind)
 	k->keysyms = xmalloc(k->keysyms_len * sizeof(xkb_keysym_t));
 	memcpy(k->keysyms, keysyms, k->keysyms_len * sizeof(xkb_keysym_t));
 	wl_list_init(&k->actions);
+	k->toggleable = false;
+	k->enabled = true;
+	k->id = NULL;
 	return k;
 }
 
@@ -218,5 +236,6 @@ keybind_destroy(struct keybind *keybind)
 	assert(wl_list_empty(&keybind->actions));
 
 	zfree(keybind->keysyms);
+	zfree(keybind->id);
 	zfree(keybind);
 }

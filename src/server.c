@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _POSIX_C_SOURCE 200809L
 #include "config.h"
+#include <stdio.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <wlr/backend/headless.h>
 #include <wlr/backend/multi.h>
 #include <wlr/render/allocator.h>
@@ -46,6 +49,7 @@
 
 #include "action.h"
 #include "common/macros.h"
+#include "config/keybind.h"
 #include "config/rcxml.h"
 #include "config/session.h"
 #include "decorations.h"
@@ -123,6 +127,62 @@ handle_sigterm(int signal, void *data)
 	struct wl_display *display = data;
 
 	wl_display_terminate(display);
+	return 0;
+}
+
+static void
+process_keybind_command(struct server *server, const char *command, const char *id)
+{
+	struct keybind *keybind = keybind_find_by_id(id);
+	if (!keybind) {
+		wlr_log(WLR_ERROR, "Keybind with id '%s' not found", id);
+		return;
+	}
+	if (!keybind->toggleable) {
+		wlr_log(WLR_ERROR, "Keybind with id '%s' is not toggleable", id);
+		return;
+	}
+
+	if (!strcmp(command, "enable")) {
+		keybind->enabled = true;
+		wlr_log(WLR_INFO, "Enabled keybind with id '%s'", id);
+	} else if (!strcmp(command, "disable")) {
+		keybind->enabled = false;
+		wlr_log(WLR_INFO, "Disabled keybind with id '%s'", id);
+	} else if (!strcmp(command, "toggle")) {
+		keybind->enabled = !keybind->enabled;
+		wlr_log(WLR_INFO, "%s keybind with id '%s'",
+			keybind->enabled ? "Enabled" : "Disabled", id);
+	} else {
+		wlr_log(WLR_ERROR, "Unknown keybind command: %s", command);
+	}
+}
+
+static int
+handle_sigusr1(int signal, void *data)
+{
+	struct server *server = data;
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		return 0;
+	}
+
+	char cmd_file[256];
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-keybind-cmd", runtime_dir);
+
+	FILE *f = fopen(cmd_file, "r");
+	if (!f) {
+		return 0;
+	}
+
+	char command[32];
+	char id[256];
+	if (fscanf(f, "%31s %255s", command, id) == 2) {
+		process_keybind_command(server, command, id);
+	}
+
+	fclose(f);
+	unlink(cmd_file);
 	return 0;
 }
 
@@ -444,6 +504,8 @@ server_init(struct server *server)
 		server->wl_event_loop, SIGTERM, handle_sigterm, server->wl_display);
 	server->sigchld_source = wl_event_loop_add_signal(
 		server->wl_event_loop, SIGCHLD, handle_sigchld, server);
+	server->sigusr1_source = wl_event_loop_add_signal(
+		server->wl_event_loop, SIGUSR1, handle_sigusr1, server);
 
 	/*
 	 * Prevent wayland clients that request the X11 clipboard but closing
@@ -768,6 +830,7 @@ server_finish(struct server *server)
 	wl_event_source_remove(server->sigint_source);
 	wl_event_source_remove(server->sigterm_source);
 	wl_event_source_remove(server->sigchld_source);
+	wl_event_source_remove(server->sigusr1_source);
 
 	wl_display_destroy_clients(server->wl_display);
 

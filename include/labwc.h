@@ -164,6 +164,7 @@ struct server {
 	struct wl_event_source *sigint_source;
 	struct wl_event_source *sigterm_source;
 	struct wl_event_source *sigchld_source;
+	struct wl_event_source *sigusr1_source;
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wlr_layer_shell_v1 *layer_shell;

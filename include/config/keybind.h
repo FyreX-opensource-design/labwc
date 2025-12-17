@@ -23,6 +23,9 @@ struct keybind {
 	struct wl_list actions;  /* struct action.link */
 	struct wl_list link;     /* struct rcxml.keybinds */
 	bool on_release;
+	bool toggleable;         /* opt-in flag for toggle support */
+	bool enabled;            /* runtime enabled/disabled state */
+	char *id;                /* optional identifier for toggling */
 };
 
 /**
@@ -46,4 +49,11 @@ bool keybind_contains_keycode(struct keybind *keybind, xkb_keycode_t keycode);
 bool keybind_contains_keysym(struct keybind *keybind, xkb_keysym_t keysym);
 
 void keybind_update_keycodes(struct server *server);
+
+/**
+ * keybind_find_by_id - find a keybind by its id
+ * @id: keybind identifier
+ * Returns the keybind if found, NULL otherwise
+ */
+struct keybind *keybind_find_by_id(const char *id);
 #endif /* LABWC_KEYBIND_H */

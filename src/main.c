@@ -3,10 +3,15 @@
 #include <getopt.h>
 #include <pango/pangocairo.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "common/fd-util.h"
 #include "common/font.h"
 #include "common/spawn.h"
+#include "config/keybind.h"
 #include "config/rcxml.h"
 #include "config/session.h"
 #include "labwc.h"
@@ -28,6 +33,9 @@ static const struct option long_options[] = {
 	{"session", required_argument, NULL, 'S'},
 	{"version", no_argument, NULL, 'v'},
 	{"verbose", no_argument, NULL, 'V'},
+	{"enable-keybind", required_argument, NULL, 1000},
+	{"disable-keybind", required_argument, NULL, 1001},
+	{"toggle-keybind", required_argument, NULL, 1002},
 	{0, 0, 0, 0}
 };
 
@@ -43,7 +51,10 @@ static const char labwc_usage[] =
 "  -s, --startup <command>  Run command on startup\n"
 "  -S, --session <command>  Run command on startup and terminate on exit\n"
 "  -v, --version            Show version number and quit\n"
-"  -V, --verbose            Enable more verbose logging\n";
+"  -V, --verbose            Enable more verbose logging\n"
+"      --enable-keybind <id>   Enable a toggleable keybind\n"
+"      --disable-keybind <id>  Disable a toggleable keybind\n"
+"      --toggle-keybind <id>   Toggle a toggleable keybind\n";
 
 static void
 usage(void)
@@ -120,6 +131,37 @@ send_signal_to_labwc_pid(int signal)
 	kill(pid, signal);
 }
 
+static void
+send_keybind_command(const char *command, const char *id)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *labwc_pid = getenv("LABWC_PID");
+	if (!labwc_pid) {
+		fprintf(stderr, "LABWC_PID not set - labwc is not running\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char cmd_file[256];
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-keybind-cmd", runtime_dir);
+
+	FILE *f = fopen(cmd_file, "w");
+	if (!f) {
+		perror("Failed to open command file");
+		exit(EXIT_FAILURE);
+	}
+
+	fprintf(f, "%s %s\n", command, id);
+	fclose(f);
+
+	/* Trigger the running instance to process the command */
+	send_signal_to_labwc_pid(SIGUSR1);
+}
+
 struct idle_ctx {
 	struct server *server;
 	const char *primary_client;
@@ -194,6 +236,15 @@ main(int argc, char *argv[])
 		case 'V':
 			verbosity = WLR_INFO;
 			break;
+		case 1000: /* --enable-keybind */
+			send_keybind_command("enable", optarg);
+			exit(0);
+		case 1001: /* --disable-keybind */
+			send_keybind_command("disable", optarg);
+			exit(0);
+		case 1002: /* --toggle-keybind */
+			send_keybind_command("toggle", optarg);
+			exit(0);
 		case 'h':
 		default:
 			usage();

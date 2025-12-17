@@ -196,6 +196,9 @@ match_keybinding_for_sym(struct server *server, uint32_t modifiers,
 		if (modifiers ^ keybind->modifiers) {
 			continue;
 		}
+		if (!keybind->enabled) {
+			continue;
+		}
 		if (view_inhibits_actions(server->active_view, &keybind->actions)) {
 			continue;
 		}
