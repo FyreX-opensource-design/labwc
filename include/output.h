@@ -4,6 +4,7 @@
 
 #include <wlr/types/wlr_output.h>
 #include "common/edge.h"
+#include "config/rcxml.h"
 
 #define LAB_NR_LAYERS (4)
 
@@ -46,6 +47,7 @@ struct output {
 	uint64_t id_bit;
 
 	bool gamma_lut_changed;
+	enum hdr_mode hdr_mode;  /* Per-output HDR setting */
 };
 
 #undef LAB_NR_LAYERS
@@ -80,6 +82,7 @@ struct wlr_box output_usable_area_in_layout_coords(struct output *output);
 void handle_output_power_manager_set_mode(struct wl_listener *listener,
 	void *data);
 void output_enable_adaptive_sync(struct output *output, bool enabled);
+void output_enable_hdr(struct output *output, bool enabled);
 
 /**
  * Notifies whether a fullscreen view is displayed on the given output.

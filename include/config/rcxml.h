@@ -23,6 +23,12 @@ enum adaptive_sync_mode {
 	LAB_ADAPTIVE_SYNC_FULLSCREEN,
 };
 
+enum hdr_mode {
+	LAB_HDR_DISABLED,
+	LAB_HDR_ENABLED,
+	LAB_HDR_AUTO,
+};
+
 enum resize_indicator_mode {
 	LAB_RESIZE_INDICATOR_NEVER = 0,
 	LAB_RESIZE_INDICATOR_ALWAYS,
@@ -57,6 +63,12 @@ struct usable_area_override {
 	struct wl_list link; /* struct rcxml.usable_area_overrides */
 };
 
+struct output_hdr_config {
+	enum hdr_mode hdr;
+	char *output;
+	struct wl_list link; /* struct rcxml.output_hdr_configs */
+};
+
 struct rcxml {
 	/* from command line */
 	char *config_dir;
@@ -69,6 +81,7 @@ struct rcxml {
 	int gap;
 	enum adaptive_sync_mode adaptive_sync;
 	enum tearing_mode allow_tearing;
+	enum hdr_mode hdr;
 	bool auto_enable_outputs;
 	bool reuse_output_mode;
 	bool xwayland_persistence;
@@ -112,6 +125,9 @@ struct rcxml {
 
 	/* <margin top="" bottom="" left="" right="" output="" /> */
 	struct wl_list usable_area_overrides;
+
+	/* <hdr output="" enabled="yes|no|auto" /> */
+	struct wl_list output_hdr_configs;
 
 	/* keyboard */
 	int repeat_rate;

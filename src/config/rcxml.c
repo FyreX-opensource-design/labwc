@@ -228,6 +228,34 @@ fill_usable_area_override(xmlNode *node)
 	}
 }
 
+static void set_hdr_mode(const char *str, enum hdr_mode *variable);
+
+static void
+fill_output_hdr_config(xmlNode *node)
+{
+	struct output_hdr_config *hdr_config = znew(*hdr_config);
+	wl_list_append(&rc.output_hdr_configs, &hdr_config->link);
+	hdr_config->hdr = LAB_HDR_AUTO;  /* Default */
+
+	xmlNode *child;
+	char *key, *content;
+	LAB_XML_FOR_EACH(node, child, key, content) {
+		if (!strcmp(key, "output")) {
+			xstrdup_replace(hdr_config->output, content);
+		} else if (!strcmp(key, "enabled")) {
+			set_hdr_mode(content, &hdr_config->hdr);
+		} else {
+			wlr_log(WLR_ERROR, "Unexpected data in output-hdr-config "
+				"parser: %s=\"%s\"", key, content);
+		}
+	}
+
+	const char *mode_str = hdr_config->hdr == LAB_HDR_ENABLED ? "enabled" :
+		hdr_config->hdr == LAB_HDR_DISABLED ? "disabled" : "auto";
+	wlr_log(WLR_ERROR, "HDR: Parsed HDR config: output=\"%s\" mode=%s",
+		hdr_config->output ? hdr_config->output : "(all)", mode_str);
+}
+
 /* Does a boolean-parse but also allows 'default' */
 static void
 set_property(const char *str, enum property *variable)
@@ -1036,6 +1064,20 @@ set_tearing_mode(const char *str, enum tearing_mode *variable)
 	}
 }
 
+static void
+set_hdr_mode(const char *str, enum hdr_mode *variable)
+{
+	wlr_log(WLR_ERROR, "HDR: set_hdr_mode called with value: '%s'", str ? str : "(null)");
+	if (!strcasecmp(str, "auto")) {
+		*variable = LAB_HDR_AUTO;
+	} else if (parse_bool(str, -1) == 1) {
+		*variable = LAB_HDR_ENABLED;
+	} else {
+		*variable = LAB_HDR_DISABLED;
+	}
+	wlr_log(WLR_ERROR, "HDR: set_hdr_mode result: %d", *variable);
+}
+
 /* Returns true if the node's children should also be traversed */
 static bool
 entry(xmlNode *node, char *nodename, char *content)
@@ -1050,6 +1092,8 @@ entry(xmlNode *node, char *nodename, char *content)
 	/* handle nested nodes */
 	if (!strcasecmp(nodename, "margin")) {
 		fill_usable_area_override(node);
+	} else if (!strcasecmp(nodename, "hdr")) {
+		fill_output_hdr_config(node);
 	} else if (!strcasecmp(nodename, "keybind.keyboard")) {
 		fill_keybind(node);
 	} else if (!strcasecmp(nodename, "context.mouse")) {
@@ -1098,6 +1142,11 @@ entry(xmlNode *node, char *nodename, char *content)
 		rc.gap = atoi(content);
 	} else if (!strcasecmp(nodename, "adaptiveSync.core")) {
 		set_adaptive_sync_mode(content, &rc.adaptive_sync);
+	} else if (!strcasecmp(nodename, "hdr.core")) {
+		set_hdr_mode(content, &rc.hdr);
+		const char *mode_str = rc.hdr == LAB_HDR_ENABLED ? "enabled" :
+			rc.hdr == LAB_HDR_DISABLED ? "disabled" : "auto";
+		wlr_log(WLR_ERROR, "HDR: Parsed global HDR setting: %s", mode_str);
 	} else if (!strcasecmp(nodename, "allowTearing.core")) {
 		set_tearing_mode(content, &rc.allow_tearing);
 	} else if (!strcasecmp(nodename, "autoEnableOutputs.core")) {
@@ -1420,6 +1469,7 @@ rcxml_init(void)
 
 	if (!has_run) {
 		wl_list_init(&rc.usable_area_overrides);
+		wl_list_init(&rc.output_hdr_configs);
 		wl_list_init(&rc.keybinds);
 		wl_list_init(&rc.mousebinds);
 		wl_list_init(&rc.libinput_categories);
@@ -1446,6 +1496,7 @@ rcxml_init(void)
 
 	rc.gap = 0;
 	rc.adaptive_sync = LAB_ADAPTIVE_SYNC_DISABLED;
+	rc.hdr = LAB_HDR_AUTO;
 	rc.allow_tearing = LAB_TEARING_DISABLED;
 	rc.auto_enable_outputs = true;
 	rc.reuse_output_mode = false;
@@ -1979,6 +2030,13 @@ rcxml_finish(void)
 		wl_list_remove(&area->link);
 		zfree(area->output);
 		zfree(area);
+	}
+
+	struct output_hdr_config *hdr_cfg, *hdr_cfg_tmp;
+	wl_list_for_each_safe(hdr_cfg, hdr_cfg_tmp, &rc.output_hdr_configs, link) {
+		wl_list_remove(&hdr_cfg->link);
+		zfree(hdr_cfg->output);
+		zfree(hdr_cfg);
 	}
 
 	struct keybind *k, *k_tmp;

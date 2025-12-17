@@ -21,7 +21,10 @@
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_buffer.h>
+#include <wlr/render/color.h>
 #include <wlr/util/log.h>
+#include <drm_fourcc.h>
 #include "common/macros.h"
 #include "common/mem.h"
 #include "common/scene-helpers.h"
@@ -377,6 +380,29 @@ output_test_auto(struct wlr_output *wlr_output, struct wlr_output_state *state,
 	return false;
 }
 
+static enum hdr_mode
+get_output_hdr_mode(struct output *output)
+{
+	/* Check for per-output HDR config first */
+	struct output_hdr_config *hdr_cfg;
+	wl_list_for_each(hdr_cfg, &rc.output_hdr_configs, link) {
+		if (hdr_cfg->output && output->wlr_output->name &&
+				!strcmp(hdr_cfg->output, output->wlr_output->name)) {
+	const char *mode_str = hdr_cfg->hdr == LAB_HDR_ENABLED ? "enabled" :
+		hdr_cfg->hdr == LAB_HDR_DISABLED ? "disabled" : "auto";
+	wlr_log(WLR_ERROR, "HDR: Using per-output HDR config for %s: %s",
+		output->wlr_output->name, mode_str);
+			return hdr_cfg->hdr;
+		}
+	}
+	/* Fall back to global HDR setting */
+	const char *mode_str = rc.hdr == LAB_HDR_ENABLED ? "enabled" :
+		rc.hdr == LAB_HDR_DISABLED ? "disabled" : "auto";
+	wlr_log(WLR_ERROR, "HDR: Using global HDR setting for %s: %s",
+		output->wlr_output->name, mode_str);
+	return rc.hdr;
+}
+
 static void
 configure_new_output(struct server *server, struct output *output)
 {
@@ -397,6 +423,23 @@ configure_new_output(struct server *server, struct output *output)
 
 	if (rc.adaptive_sync == LAB_ADAPTIVE_SYNC_ENABLED) {
 		output_enable_adaptive_sync(output, true);
+	}
+
+	/* Get per-output HDR setting or fall back to global */
+	enum hdr_mode hdr_mode = get_output_hdr_mode(output);
+	output->hdr_mode = hdr_mode;
+
+	const char *mode_str = hdr_mode == LAB_HDR_ENABLED ? "enabled" :
+		hdr_mode == LAB_HDR_DISABLED ? "disabled" : "auto";
+	wlr_log(WLR_ERROR, "HDR: Applying HDR mode to output %s: %s",
+		wlr_output->name, mode_str);
+
+	if (hdr_mode == LAB_HDR_ENABLED) {
+		output_enable_hdr(output, true);
+	} else if (hdr_mode == LAB_HDR_AUTO) {
+		/* Auto-detect HDR capability - try to enable if supported */
+		/* output_enable_hdr will check support and enable if available */
+		output_enable_hdr(output, true);
 	}
 
 	output_state_commit(output);
@@ -499,12 +542,10 @@ handle_new_output(struct wl_listener *listener, void *data)
 	 *
 	 * TODO: remove once labwc starts tracking 0.20.x and the fix has been merged.
 	 */
-#if LAB_WLR_VERSION_AT_LEAST(0, 19, 1)
 	if (server->drm_lease_manager && wlr_output_is_drm(wlr_output)) {
 		wlr_drm_lease_v1_manager_offer_output(
 			server->drm_lease_manager, wlr_output);
 	}
-#endif
 
 	/*
 	 * Don't configure any non-desktop displays, such as VR headsets;
@@ -529,6 +570,7 @@ handle_new_output(struct wl_listener *listener, void *data)
 	wlr_output->data = output;
 	output->server = server;
 	output->id_bit = id_bit;
+	output->hdr_mode = LAB_HDR_AUTO;  /* Default, will be set in configure_new_output */
 	output_state_init(output);
 
 	wl_list_insert(&server->outputs, &output->link);
@@ -1185,6 +1227,93 @@ output_enable_adaptive_sync(struct output *output, bool enabled)
 	} else {
 		wlr_log(WLR_INFO, "adaptive sync %sabled for output %s",
 			enabled ? "en" : "dis", output->wlr_output->name);
+	}
+}
+
+void
+output_enable_hdr(struct output *output, bool enabled)
+{
+	if (!output_is_usable(output)) {
+		return;
+	}
+
+	struct wlr_output *wlr_output = output->wlr_output;
+
+	/* Check if output supports HDR */
+	if (!wlr_output_is_drm(wlr_output)) {
+		/* HDR is typically only supported on DRM outputs */
+		if (enabled) {
+			wlr_log(WLR_DEBUG, "HDR not supported on non-DRM output %s",
+				wlr_output->name);
+		}
+		output->hdr_mode = enabled ? LAB_HDR_ENABLED : LAB_HDR_DISABLED;
+		return;
+	}
+
+	if (enabled) {
+		/* Check if output supports 10-bit formats for HDR */
+		const struct wlr_drm_format_set *formats =
+			wlr_output_get_primary_formats(wlr_output, WLR_BUFFER_CAP_DMABUF);
+		if (!formats) {
+			wlr_log(WLR_DEBUG, "Cannot get primary formats for output %s",
+				wlr_output->name);
+			output->hdr_mode = LAB_HDR_DISABLED;
+			return;
+		}
+
+		/* Check for 10-bit HDR formats */
+		bool supports_hdr_format = false;
+		uint32_t hdr_format = DRM_FORMAT_XBGR2101010; /* Preferred HDR format */
+		
+		for (size_t i = 0; i < formats->len; i++) {
+			if (formats->formats[i].format == DRM_FORMAT_XBGR2101010 ||
+			    formats->formats[i].format == DRM_FORMAT_XRGB2101010) {
+				supports_hdr_format = true;
+				hdr_format = formats->formats[i].format;
+				break;
+			}
+		}
+
+		if (!supports_hdr_format) {
+			wlr_log(WLR_INFO, "Output %s does not support HDR formats",
+				wlr_output->name);
+			output->hdr_mode = LAB_HDR_DISABLED;
+			return;
+		}
+
+		/* Set HDR render format */
+		wlr_output_state_set_render_format(&output->pending, hdr_format);
+
+		/* Create HDR image description with ST2084 PQ transfer function */
+		struct wlr_output_image_description img_desc = {
+			.primaries = WLR_COLOR_NAMED_PRIMARIES_BT2020,
+			.transfer_function = WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ,
+		};
+
+		if (!wlr_output_state_set_image_description(&output->pending, &img_desc)) {
+			wlr_log(WLR_ERROR, "Failed to set HDR image description for output %s",
+				wlr_output->name);
+			output->hdr_mode = LAB_HDR_DISABLED;
+			return;
+		}
+
+		wlr_log(WLR_INFO, "HDR enabled for output %s (format: 0x%08x)",
+			wlr_output->name, hdr_format);
+		output->hdr_mode = LAB_HDR_ENABLED;
+	} else {
+		/* Disable HDR - reset to default SDR format */
+		/* Use default format (typically 8-bit) */
+		wlr_output_state_set_render_format(&output->pending, 0);
+
+		/* Set SDR image description */
+		struct wlr_output_image_description img_desc = {
+			.primaries = WLR_COLOR_NAMED_PRIMARIES_SRGB,
+			.transfer_function = WLR_COLOR_TRANSFER_FUNCTION_SRGB,
+		};
+
+		wlr_output_state_set_image_description(&output->pending, &img_desc);
+		wlr_log(WLR_INFO, "HDR disabled for output %s", wlr_output->name);
+		output->hdr_mode = LAB_HDR_DISABLED;
 	}
 }
 
