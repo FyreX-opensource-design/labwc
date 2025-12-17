@@ -7,14 +7,17 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <wlr/backend/drm.h>
 #include <wlr/backend/headless.h>
 #include <wlr/backend/multi.h>
 #include <wlr/render/allocator.h>
+#include <wlr/render/color.h>
 #include <wlr/types/wlr_alpha_modifier_v1.h>
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_drm.h>
 #include <wlr/types/wlr_drm_lease_v1.h>
+#include <drm_fourcc.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
 #include <wlr/types/wlr_ext_data_control_v1.h>
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
@@ -183,6 +186,153 @@ handle_sigusr1(int signal, void *data)
 
 	fclose(f);
 	unlink(cmd_file);
+	return 0;
+}
+
+static void
+write_hdr_status_idle(void *data)
+{
+	struct server *server = data;
+	if (!server) {
+		return;
+	}
+
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		return;
+	}
+
+	char status_file[256];
+	snprintf(status_file, sizeof(status_file), "%s/labwc-hdr-status", runtime_dir);
+
+	FILE *f = fopen(status_file, "w");
+	if (!f) {
+		wlr_log(WLR_ERROR, "Failed to open HDR status file for writing: %s", status_file);
+		wlr_log(WLR_ERROR, "XDG_RUNTIME_DIR: %s", runtime_dir);
+		return;
+	}
+
+	fprintf(f, "HDR Status:\n");
+	fprintf(f, "===========\n\n");
+
+	int output_count = 0;
+	struct output *output;
+	wl_list_for_each(output, &server->outputs, link) {
+		if (!output) {
+			continue;
+		}
+
+		if (!output_is_usable(output)) {
+			continue;
+		}
+
+		/* Only access our own safe fields and output name */
+		const char *hdr_status = "disabled";
+		if (output->hdr_mode == LAB_HDR_ENABLED) {
+			hdr_status = "enabled";
+		} else if (output->hdr_mode == LAB_HDR_AUTO) {
+			hdr_status = "auto";
+		}
+
+		const char *output_name = "(unnamed)";
+		if (output->wlr_output && output->wlr_output->name) {
+			output_name = output->wlr_output->name;
+		}
+
+		fprintf(f, "Output: %s\n", output_name);
+		fprintf(f, "  HDR Mode: %s\n", hdr_status);
+
+		/* Get actual HDR state from wlr_output */
+		if (output->wlr_output) {
+			struct wlr_output *wlr_output = output->wlr_output;
+
+			/* Current render format */
+			if (wlr_output->render_format) {
+				fprintf(f, "  Render Format: 0x%08x", wlr_output->render_format);
+				/* Check if it's an HDR format */
+				if (wlr_output->render_format == DRM_FORMAT_XBGR2101010 ||
+				    wlr_output->render_format == DRM_FORMAT_XRGB2101010) {
+					fprintf(f, " (10-bit HDR)");
+				} else {
+					fprintf(f, " (8-bit SDR)");
+				}
+				fprintf(f, "\n");
+			}
+
+			/* Current image description (color space) */
+			if (wlr_output->image_description) {
+				const char *primaries_str = "unknown";
+				const char *transfer_str = "unknown";
+
+				uint32_t primaries = wlr_output->image_description->primaries;
+				uint32_t transfer = wlr_output->image_description->transfer_function;
+
+				if (primaries == WLR_COLOR_NAMED_PRIMARIES_BT2020) {
+					primaries_str = "BT2020";
+				} else if (primaries == WLR_COLOR_NAMED_PRIMARIES_SRGB) {
+					primaries_str = "SRGB";
+				}
+
+				if (transfer == WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ) {
+					transfer_str = "ST2084_PQ (HDR)";
+				} else if (transfer == WLR_COLOR_TRANSFER_FUNCTION_SRGB) {
+					transfer_str = "SRGB (SDR)";
+				}
+
+				fprintf(f, "  Color Space: primaries=%s, transfer=%s\n",
+					primaries_str, transfer_str);
+			} else {
+				fprintf(f, "  Color Space: not set\n");
+			}
+
+			/* HDR capabilities */
+			if (wlr_output_is_drm(wlr_output)) {
+				fprintf(f, "  HDR Capabilities:\n");
+				fprintf(f, "    Supported Primaries: 0x%x\n",
+					wlr_output->supported_primaries);
+				fprintf(f, "    Supported Transfer Functions: 0x%x\n",
+					wlr_output->supported_transfer_functions);
+
+				bool supports_bt2020 = (wlr_output->supported_primaries &
+					WLR_COLOR_NAMED_PRIMARIES_BT2020) != 0;
+				bool supports_pq = (wlr_output->supported_transfer_functions &
+					WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ) != 0;
+
+				if (supports_bt2020 && supports_pq) {
+					fprintf(f, "    HDR Support: Yes (BT2020 + ST2084_PQ)\n");
+				} else {
+					fprintf(f, "    HDR Support: No\n");
+				}
+			} else {
+				fprintf(f, "  HDR Capabilities: Not available (non-DRM output)\n");
+			}
+		}
+
+		fprintf(f, "\n");
+		output_count++;
+	}
+
+	if (output_count == 0) {
+		fprintf(f, "No usable outputs found.\n");
+	}
+
+	fclose(f);
+	wlr_log(WLR_INFO, "HDR status query processed, %d outputs", output_count);
+}
+
+static int
+handle_sigusr2(int signal, void *data)
+{
+	struct server *server = data;
+	if (!server || !server->wl_event_loop) {
+		wlr_log(WLR_ERROR, "HDR: SIGUSR2 received but server or event loop is NULL");
+		return 0;
+	}
+
+	wlr_log(WLR_INFO, "HDR: SIGUSR2 received, writing HDR status");
+	/* Defer the actual work to an idle callback to avoid accessing
+	 * wlr_output fields from signal handler context */
+	wl_event_loop_add_idle(server->wl_event_loop, write_hdr_status_idle, server);
 	return 0;
 }
 
@@ -506,6 +656,8 @@ server_init(struct server *server)
 		server->wl_event_loop, SIGCHLD, handle_sigchld, server);
 	server->sigusr1_source = wl_event_loop_add_signal(
 		server->wl_event_loop, SIGUSR1, handle_sigusr1, server);
+	server->sigusr2_source = wl_event_loop_add_signal(
+		server->wl_event_loop, SIGUSR2, handle_sigusr2, server);
 
 	/*
 	 * Prevent wayland clients that request the X11 clipboard but closing
@@ -831,6 +983,7 @@ server_finish(struct server *server)
 	wl_event_source_remove(server->sigterm_source);
 	wl_event_source_remove(server->sigchld_source);
 	wl_event_source_remove(server->sigusr1_source);
+	wl_event_source_remove(server->sigusr2_source);
 
 	wl_display_destroy_clients(server->wl_display);
 

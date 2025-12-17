@@ -237,16 +237,32 @@ fill_output_hdr_config(xmlNode *node)
 	wl_list_append(&rc.output_hdr_configs, &hdr_config->link);
 	hdr_config->hdr = LAB_HDR_AUTO;  /* Default */
 
-	xmlNode *child;
-	char *key, *content;
-	LAB_XML_FOR_EACH(node, child, key, content) {
-		if (!strcmp(key, "output")) {
-			xstrdup_replace(hdr_config->output, content);
-		} else if (!strcmp(key, "enabled")) {
-			set_hdr_mode(content, &hdr_config->hdr);
-		} else {
-			wlr_log(WLR_ERROR, "Unexpected data in output-hdr-config "
-				"parser: %s=\"%s\"", key, content);
+	/* Try both attributes and child nodes for compatibility */
+	xmlChar *output_attr = xmlGetProp(node, (xmlChar *)"output");
+	if (output_attr) {
+		xstrdup_replace(hdr_config->output, (char *)output_attr);
+		wlr_log(WLR_ERROR, "HDR: Found output attribute: %s", (char *)output_attr);
+		xmlFree(output_attr);
+	} else {
+		/* Fall back to child node */
+		char output_name[256];
+		if (lab_xml_get_string(node, "output", output_name, sizeof(output_name))) {
+			xstrdup_replace(hdr_config->output, output_name);
+			wlr_log(WLR_ERROR, "HDR: Found output child node: %s", output_name);
+		}
+	}
+
+	xmlChar *enabled_attr = xmlGetProp(node, (xmlChar *)"enabled");
+	if (enabled_attr) {
+		wlr_log(WLR_ERROR, "HDR: Found enabled attribute: %s", (char *)enabled_attr);
+		set_hdr_mode((char *)enabled_attr, &hdr_config->hdr);
+		xmlFree(enabled_attr);
+	} else {
+		/* Fall back to child node */
+		char enabled_str[256];
+		if (lab_xml_get_string(node, "enabled", enabled_str, sizeof(enabled_str))) {
+			wlr_log(WLR_ERROR, "HDR: Found enabled child node: %s", enabled_str);
+			set_hdr_mode(enabled_str, &hdr_config->hdr);
 		}
 	}
 

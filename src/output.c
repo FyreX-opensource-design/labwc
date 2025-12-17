@@ -253,6 +253,12 @@ handle_output_request_state(struct wl_listener *listener, void *data)
 	if (!wlr_output_commit_state(output->wlr_output, event->state)) {
 		wlr_log(WLR_ERROR, "Backend requested a new state that could not be applied");
 	}
+	/*
+	 * Note: HDR cannot be re-applied after the display has been initialized
+	 * by a display manager (e.g., lightdm). HDR requires the display to be
+	 * initialized in HDR mode from the start, which typically requires a
+	 * relog or starting labwc directly without a display manager.
+	 */
 }
 
 static void do_output_layout_change(struct server *server);
@@ -442,7 +448,69 @@ configure_new_output(struct server *server, struct output *output)
 		output_enable_hdr(output, true);
 	}
 
-	output_state_commit(output);
+	/* Commit the output state including HDR settings */
+	bool committed = output_state_commit(output);
+	if (!committed) {
+		wlr_log(WLR_ERROR, "HDR: Failed to commit output state for %s",
+			wlr_output->name);
+		/* If commit failed and we were trying to enable HDR, reset hdr_mode */
+		if (hdr_mode == LAB_HDR_AUTO || hdr_mode == LAB_HDR_ENABLED) {
+			output->hdr_mode = LAB_HDR_DISABLED;
+		}
+	} else {
+		/* Verify the state was actually applied */
+		const char *actual_primaries = "unknown";
+		const char *actual_transfer = "unknown";
+		if (wlr_output->image_description) {
+			uint32_t primaries_val = wlr_output->image_description->primaries;
+			uint32_t transfer_val = wlr_output->image_description->transfer_function;
+			
+			if (primaries_val == WLR_COLOR_NAMED_PRIMARIES_BT2020) {
+				actual_primaries = "BT2020";
+			} else if (primaries_val == WLR_COLOR_NAMED_PRIMARIES_SRGB) {
+				actual_primaries = "SRGB";
+			} else {
+				actual_primaries = "other";
+			}
+			
+			if (transfer_val == WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ) {
+				actual_transfer = "ST2084_PQ";
+			} else if (transfer_val == WLR_COLOR_TRANSFER_FUNCTION_SRGB) {
+				actual_transfer = "SRGB";
+			} else {
+				actual_transfer = "other";
+			}
+			
+			wlr_log(WLR_ERROR, "HDR: Image description present: primaries=0x%x, transfer=0x%x",
+				primaries_val, transfer_val);
+		} else {
+			wlr_log(WLR_ERROR, "HDR: Image description is NULL after commit");
+		}
+		
+		/* Check if HDR is actually active (10-bit format + HDR color space) */
+		bool hdr_active = false;
+		if (wlr_output->render_format == DRM_FORMAT_XBGR2101010 ||
+		    wlr_output->render_format == DRM_FORMAT_XRGB2101010) {
+			if (wlr_output->image_description &&
+			    wlr_output->image_description->primaries == WLR_COLOR_NAMED_PRIMARIES_BT2020 &&
+			    wlr_output->image_description->transfer_function == WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ) {
+				hdr_active = true;
+			}
+		}
+		
+		/* Update hdr_mode based on actual state */
+		if (hdr_mode == LAB_HDR_AUTO) {
+			/* In auto mode, set to enabled if HDR is actually active, disabled otherwise */
+			output->hdr_mode = hdr_active ? LAB_HDR_ENABLED : LAB_HDR_DISABLED;
+		} else if (hdr_mode == LAB_HDR_ENABLED && !hdr_active) {
+			/* If we tried to enable but it's not active, mark as disabled */
+			output->hdr_mode = LAB_HDR_DISABLED;
+		}
+		
+		wlr_log(WLR_ERROR, "HDR: Successfully committed output state for %s (format: 0x%08x, primaries: %s, transfer: %s, HDR active: %s)",
+			wlr_output->name, wlr_output->render_format, actual_primaries, actual_transfer,
+			hdr_active ? "yes" : "no");
+	}
 
 	wlr_output_effective_resolution(wlr_output,
 		&output->usable_area.width, &output->usable_area.height);
@@ -732,6 +800,15 @@ output_config_apply(struct server *server,
 			output_enable_adaptive_sync(output,
 				head->state.adaptive_sync_enabled);
 		}
+		/*
+		 * Note: HDR settings are applied during initial output configuration
+		 * in configure_new_output(). HDR cannot be re-applied after the display
+		 * has been initialized by a display manager (e.g., lightdm) because HDR
+		 * requires the display to be initialized in HDR mode from the start.
+		 * This typically requires a relog or starting labwc directly without
+		 * a display manager.
+		 */
+
 		if (!output_state_commit(output)) {
 			/*
 			 * FIXME: This is only part of the story, we should revert
@@ -1233,6 +1310,13 @@ output_enable_adaptive_sync(struct output *output, bool enabled)
 void
 output_enable_hdr(struct output *output, bool enabled)
 {
+	/*
+	 * Note: When HDR is enabled, SDR content (like wallpapers) may appear
+	 * washed out because there is no automatic tone mapping from sRGB to HDR
+	 * color space. This is a known limitation and affects other compositors
+	 * as well. Proper SDR-to-HDR tone mapping would need to be implemented
+	 * in the rendering pipeline.
+	 */
 	if (!output_is_usable(output)) {
 		return;
 	}
@@ -1255,49 +1339,122 @@ output_enable_hdr(struct output *output, bool enabled)
 		const struct wlr_drm_format_set *formats =
 			wlr_output_get_primary_formats(wlr_output, WLR_BUFFER_CAP_DMABUF);
 		if (!formats) {
-			wlr_log(WLR_DEBUG, "Cannot get primary formats for output %s",
+			wlr_log(WLR_ERROR, "HDR: Cannot get primary formats for output %s",
 				wlr_output->name);
 			output->hdr_mode = LAB_HDR_DISABLED;
 			return;
 		}
+
+		/* Check what the output supports for color management first */
+		wlr_log(WLR_ERROR, "HDR: Output %s supported primaries: 0x%x, transfer functions: 0x%x",
+			wlr_output->name,
+			wlr_output->supported_primaries,
+			wlr_output->supported_transfer_functions);
+
+		/* Check if output supports HDR color space */
+		bool supports_bt2020 = (wlr_output->supported_primaries & WLR_COLOR_NAMED_PRIMARIES_BT2020) != 0;
+		bool supports_pq = (wlr_output->supported_transfer_functions & WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ) != 0;
+
+		if (!supports_bt2020 || !supports_pq) {
+			wlr_log(WLR_ERROR, "HDR: Output %s does not support HDR color space (BT2020: %s, ST2084_PQ: %s)",
+				wlr_output->name,
+				supports_bt2020 ? "yes" : "no",
+				supports_pq ? "yes" : "no");
+			output->hdr_mode = LAB_HDR_DISABLED;
+			return;
+		}
+
+		wlr_log(WLR_ERROR, "HDR: Checking formats for output %s (found %zu formats)",
+			wlr_output->name, formats->len);
 
 		/* Check for 10-bit HDR formats */
 		bool supports_hdr_format = false;
 		uint32_t hdr_format = DRM_FORMAT_XBGR2101010; /* Preferred HDR format */
 		
 		for (size_t i = 0; i < formats->len; i++) {
-			if (formats->formats[i].format == DRM_FORMAT_XBGR2101010 ||
-			    formats->formats[i].format == DRM_FORMAT_XRGB2101010) {
+			uint32_t fmt = formats->formats[i].format;
+			wlr_log(WLR_ERROR, "HDR: Format[%zu]: 0x%08x", i, fmt);
+			if (fmt == DRM_FORMAT_XBGR2101010 ||
+			    fmt == DRM_FORMAT_XRGB2101010) {
 				supports_hdr_format = true;
-				hdr_format = formats->formats[i].format;
+				hdr_format = fmt;
+				wlr_log(WLR_ERROR, "HDR: Found HDR format: 0x%08x", hdr_format);
 				break;
 			}
 		}
 
+		/* If 10-bit formats not found in list, try anyway if output supports HDR color space */
 		if (!supports_hdr_format) {
-			wlr_log(WLR_INFO, "Output %s does not support HDR formats",
+			wlr_log(WLR_ERROR, "HDR: Output %s supports HDR color space but 10-bit formats (XBGR2101010/XRGB2101010) not found in format list",
 				wlr_output->name);
-			output->hdr_mode = LAB_HDR_DISABLED;
-			return;
+			wlr_log(WLR_ERROR, "HDR: Attempting to enable HDR anyway - format may be supported even if not listed");
+			/* Use default 10-bit format - wlroots may accept it */
+			hdr_format = DRM_FORMAT_XBGR2101010;
 		}
 
 		/* Set HDR render format */
 		wlr_output_state_set_render_format(&output->pending, hdr_format);
+		wlr_log(WLR_ERROR, "HDR: Set render format to 0x%08x", hdr_format);
 
-		/* Create HDR image description with ST2084 PQ transfer function */
-		struct wlr_output_image_description img_desc = {
-			.primaries = WLR_COLOR_NAMED_PRIMARIES_BT2020,
-			.transfer_function = WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ,
-		};
+		/* Set image description (color space) if supported */
+		if (supports_bt2020 && supports_pq) {
+			struct wlr_output_image_description img_desc = {
+				.primaries = WLR_COLOR_NAMED_PRIMARIES_BT2020,
+				.transfer_function = WLR_COLOR_TRANSFER_FUNCTION_ST2084_PQ,
+			};
 
-		if (!wlr_output_state_set_image_description(&output->pending, &img_desc)) {
-			wlr_log(WLR_ERROR, "Failed to set HDR image description for output %s",
-				wlr_output->name);
+			if (!wlr_output_state_set_image_description(&output->pending, &img_desc)) {
+				wlr_log(WLR_ERROR, "HDR: Failed to set HDR image description for output %s",
+					wlr_output->name);
+				/* Continue anyway - format is still set */
+			} else {
+				wlr_log(WLR_ERROR, "HDR: Image description set (BT2020 + ST2084_PQ)");
+			}
+		} else {
+			wlr_log(WLR_ERROR, "HDR: Output does not support BT2020 primaries (%s) or ST2084_PQ transfer (%s), skipping image description",
+				supports_bt2020 ? "yes" : "no",
+				supports_pq ? "yes" : "no");
+			wlr_log(WLR_ERROR, "HDR: Using 10-bit format without explicit color space metadata");
+		}
+
+		/* Test if the HDR state can be committed before actually committing */
+		wlr_log(WLR_ERROR, "HDR: Testing HDR state for output %s (format: 0x%08x, has image_desc: %s)",
+			wlr_output->name, hdr_format,
+			(output->pending.committed & WLR_OUTPUT_STATE_IMAGE_DESCRIPTION) ? "yes" : "no");
+		
+		if (!wlr_output_test_state(wlr_output, &output->pending)) {
+			wlr_log(WLR_ERROR, "HDR: Output %s failed to test HDR state with format 0x%08x",
+				wlr_output->name, hdr_format);
+			wlr_log(WLR_ERROR, "HDR: This usually means the format or color space combination is not supported");
+			
+			/* For HDR, we need both format and color space - don't try just color space */
+			/* Clear everything and disable HDR */
+			wlr_output_state_set_render_format(&output->pending, 0);
+			if (output->pending.committed & WLR_OUTPUT_STATE_IMAGE_DESCRIPTION) {
+				wlr_output_state_set_image_description(&output->pending, NULL);
+			}
+			wlr_log(WLR_ERROR, "HDR: Output %s does not support HDR format 0x%08x - HDR disabled",
+				wlr_output->name, hdr_format);
 			output->hdr_mode = LAB_HDR_DISABLED;
 			return;
 		}
+		
+		wlr_log(WLR_ERROR, "HDR: State test passed for output %s", wlr_output->name);
 
-		wlr_log(WLR_INFO, "HDR enabled for output %s (format: 0x%08x)",
+		/* Verify the pending state was set correctly */
+		if (output->pending.committed & WLR_OUTPUT_STATE_IMAGE_DESCRIPTION) {
+			if (output->pending.image_description) {
+				wlr_log(WLR_ERROR, "HDR: Pending image description set: primaries=0x%x, transfer=0x%x",
+					output->pending.image_description->primaries,
+					output->pending.image_description->transfer_function);
+			} else {
+				wlr_log(WLR_ERROR, "HDR: WARNING - Image description flag set but pointer is NULL!");
+			}
+		} else {
+			wlr_log(WLR_ERROR, "HDR: WARNING - Image description not in pending state!");
+		}
+
+		wlr_log(WLR_ERROR, "HDR: Successfully enabled HDR for output %s (format: 0x%08x, primaries: BT2020, transfer: ST2084_PQ)",
 			wlr_output->name, hdr_format);
 		output->hdr_mode = LAB_HDR_ENABLED;
 	} else {
@@ -1312,7 +1469,8 @@ output_enable_hdr(struct output *output, bool enabled)
 		};
 
 		wlr_output_state_set_image_description(&output->pending, &img_desc);
-		wlr_log(WLR_INFO, "HDR disabled for output %s", wlr_output->name);
+		wlr_log(WLR_ERROR, "HDR: Disabled HDR for output %s (reset to SDR)",
+			wlr_output->name);
 		output->hdr_mode = LAB_HDR_DISABLED;
 	}
 }

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include "common/fd-util.h"
 #include "common/font.h"
@@ -36,6 +37,7 @@ static const struct option long_options[] = {
 	{"enable-keybind", required_argument, NULL, 1000},
 	{"disable-keybind", required_argument, NULL, 1001},
 	{"toggle-keybind", required_argument, NULL, 1002},
+	{"hdr-status", no_argument, NULL, 1003},
 	{0, 0, 0, 0}
 };
 
@@ -54,7 +56,8 @@ static const char labwc_usage[] =
 "  -V, --verbose            Enable more verbose logging\n"
 "      --enable-keybind <id>   Enable a toggleable keybind\n"
 "      --disable-keybind <id>  Disable a toggleable keybind\n"
-"      --toggle-keybind <id>   Toggle a toggleable keybind\n";
+"      --toggle-keybind <id>   Toggle a toggleable keybind\n"
+"      --hdr-status            Query HDR status of all outputs\n";
 
 static void
 usage(void)
@@ -162,6 +165,65 @@ send_keybind_command(const char *command, const char *id)
 	send_signal_to_labwc_pid(SIGUSR1);
 }
 
+static void
+query_hdr_status(void)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *labwc_pid = getenv("LABWC_PID");
+	if (!labwc_pid) {
+		fprintf(stderr, "LABWC_PID not set - labwc is not running\n");
+		exit(EXIT_FAILURE);
+	}
+
+	/* Remove any existing status file first */
+	char status_file[256];
+	snprintf(status_file, sizeof(status_file), "%s/labwc-hdr-status", runtime_dir);
+	unlink(status_file);
+
+	/* Trigger the running instance to process the query */
+	send_signal_to_labwc_pid(SIGUSR2);
+
+	/* Wait for the response file to be created (with timeout) */
+	int attempts = 0;
+	const int max_attempts = 50; /* 5 seconds total */
+	FILE *f = NULL;
+	while (attempts < max_attempts) {
+		f = fopen(status_file, "r");
+		if (f) {
+			break;
+		}
+		/* Sleep 100ms between attempts */
+		struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 };
+		nanosleep(&ts, NULL);
+		attempts++;
+	}
+
+	if (!f) {
+		fprintf(stderr, "Timeout waiting for HDR status response\n");
+		fprintf(stderr, "Make sure labwc is running and LABWC_PID is set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char line[512];
+	int lines_printed = 0;
+	while (fgets(line, sizeof(line), f)) {
+		printf("%s", line);
+		lines_printed++;
+	}
+	fclose(f);
+	
+	if (lines_printed == 0) {
+		fprintf(stderr, "HDR status file was empty\n");
+	}
+	
+	unlink(status_file);
+}
+
 struct idle_ctx {
 	struct server *server;
 	const char *primary_client;
@@ -244,6 +306,9 @@ main(int argc, char *argv[])
 			exit(0);
 		case 1002: /* --toggle-keybind */
 			send_keybind_command("toggle", optarg);
+			exit(0);
+		case 1003: /* --hdr-status */
+			query_hdr_status();
 			exit(0);
 		case 'h':
 		default:
