@@ -1,0 +1,165 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <assert.h>
+#include <wlr/types/wlr_scene.h>
+#include "common/macros.h"
+#include "labwc.h"
+#include "ssd.h"
+#include "ssd-internal.h"
+#include "theme.h"
+#include "view.h"
+
+void
+ssd_border_create(struct ssd *ssd)
+{
+	assert(ssd);
+	assert(!ssd->border.tree);
+
+	struct view *view = ssd->view;
+	struct theme *theme = view->server->theme;
+	int width = view->current.width;
+	int height = view_effective_height(view, /* use_pending */ false);
+	int full_width = width + 2 * theme->border_width;
+	int corner_width = ssd_get_corner_width();
+
+	ssd->border.tree = wlr_scene_tree_create(ssd->tree);
+	wlr_scene_node_set_position(&ssd->border.tree->node, -theme->border_width, 0);
+
+	enum ssd_active_state active;
+	FOR_EACH_ACTIVE_STATE(active) {
+		struct ssd_border_subtree *subtree = &ssd->border.subtrees[active];
+		subtree->tree = wlr_scene_tree_create(ssd->border.tree);
+		struct wlr_scene_tree *parent = subtree->tree;
+		wlr_scene_node_set_enabled(&parent->node, active);
+		float *color = theme->window[active].border_color;
+
+		subtree->left = wlr_scene_rect_create(parent,
+			theme->border_width, height, color);
+		wlr_scene_node_set_position(&subtree->left->node, 0, 0);
+
+		subtree->right = wlr_scene_rect_create(parent,
+			theme->border_width, height, color);
+		wlr_scene_node_set_position(&subtree->right->node,
+			theme->border_width + width, 0);
+
+		subtree->bottom = wlr_scene_rect_create(parent,
+			full_width, theme->border_width, color);
+		wlr_scene_node_set_position(&subtree->bottom->node,
+			0, height);
+
+		subtree->top = wlr_scene_rect_create(parent,
+			MAX(width - 2 * corner_width, 0), theme->border_width, color);
+		wlr_scene_node_set_position(&subtree->top->node,
+			theme->border_width + corner_width,
+			-(ssd->titlebar.height + theme->border_width));
+	}
+
+	if (view->maximized == VIEW_AXIS_BOTH) {
+		wlr_scene_node_set_enabled(&ssd->border.tree->node, false);
+	}
+
+	if (view->current.width > 0 && view->current.height > 0) {
+		/*
+		 * The SSD is recreated by a Reconfigure request
+		 * thus we may need to handle squared corners.
+		 */
+		ssd_border_update(ssd);
+	}
+}
+
+void
+ssd_border_update(struct ssd *ssd)
+{
+	assert(ssd);
+	assert(ssd->border.tree);
+
+	struct view *view = ssd->view;
+	if (view->maximized == VIEW_AXIS_BOTH
+			&& ssd->border.tree->node.enabled) {
+		/* Disable borders on maximize */
+		wlr_scene_node_set_enabled(&ssd->border.tree->node, false);
+		ssd->margin = ssd_thickness(ssd->view);
+	}
+
+	if (view->maximized == VIEW_AXIS_BOTH) {
+		return;
+	} else if (!ssd->border.tree->node.enabled) {
+		/* And re-enabled them when unmaximized */
+		wlr_scene_node_set_enabled(&ssd->border.tree->node, true);
+		ssd->margin = ssd_thickness(ssd->view);
+	}
+
+	struct theme *theme = view->server->theme;
+
+	int width = view->current.width;
+	int height = view_effective_height(view, /* use_pending */ false);
+	int full_width = width + 2 * theme->border_width;
+	int corner_width = ssd_get_corner_width();
+
+	/*
+	 * From here on we have to cover the following border scenarios:
+	 * Non-tiled (partial border, rounded corners):
+	 *    _____________
+	 *   o           oox
+	 *  |---------------|
+	 *  |_______________|
+	 *
+	 * Tiled (full border, squared corners):
+	 *   _______________
+	 *  |o           oox|
+	 *  |---------------|
+	 *  |_______________|
+	 *
+	 * Tiled or non-tiled with zero title height (full boarder, no title):
+	 *   _______________
+	 *  |_______________|
+	 */
+
+	int side_height = ssd->state.was_squared
+		? height + ssd->titlebar.height
+		: height;
+	int side_y = ssd->state.was_squared
+		? -ssd->titlebar.height
+		: 0;
+	int top_width = ssd->titlebar.height <= 0 || ssd->state.was_squared
+		? full_width
+		: MAX(width - 2 * corner_width, 0);
+	int top_x = ssd->titlebar.height <= 0 || ssd->state.was_squared
+		? 0
+		: theme->border_width + corner_width;
+
+	enum ssd_active_state active;
+	FOR_EACH_ACTIVE_STATE(active) {
+		struct ssd_border_subtree *subtree = &ssd->border.subtrees[active];
+
+		wlr_scene_rect_set_size(subtree->left,
+			theme->border_width, side_height);
+		wlr_scene_node_set_position(&subtree->left->node,
+			0, side_y);
+
+		wlr_scene_rect_set_size(subtree->right,
+			theme->border_width, side_height);
+		wlr_scene_node_set_position(&subtree->right->node,
+			theme->border_width + width, side_y);
+
+		wlr_scene_rect_set_size(subtree->bottom,
+			full_width, theme->border_width);
+		wlr_scene_node_set_position(&subtree->bottom->node,
+			0, height);
+
+		wlr_scene_rect_set_size(subtree->top,
+			top_width, theme->border_width);
+		wlr_scene_node_set_position(&subtree->top->node,
+			top_x, -(ssd->titlebar.height + theme->border_width));
+	}
+}
+
+void
+ssd_border_destroy(struct ssd *ssd)
+{
+	assert(ssd);
+	assert(ssd->border.tree);
+
+	wlr_scene_node_destroy(&ssd->border.tree->node);
+	ssd->border = (struct ssd_border_scene){0};
+}

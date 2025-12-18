@@ -1,0 +1,39 @@
+# This is an example .SRCINFO file
+# Generate the actual one with: makepkg --printsrcinfo > .SRCINFO
+# This file is for reference only
+
+pkgbase = labwc-fyrex-git
+	pkgdesc = A wlroots-based window-stacking compositor for Wayland, inspired by Openbox (FyreX fork with device blacklisting features)
+	pkgver = 0.9.2.r0.g0000000
+	pkgrel = 1
+	url = https://github.com/FyreX-opensource-design/labwc
+	arch = x86_64
+	arch = aarch64
+	license = GPL-2.0-only
+	depends = wlroots-0.19
+	depends = wayland
+	depends = libinput
+	depends = xkbcommon
+	depends = libxml2
+	depends = glib2
+	depends = cairo
+	depends = pango
+	depends = pixman
+	depends = libpng
+	depends = libdrm
+	makedepends = git
+	makedepends = meson
+	makedepends = ninja
+	makedepends = wayland-protocols
+	makedepends = scdoc
+	optdepends = librsvg: SVG window button support
+	optdepends = libsfdo: Window icon support
+	optdepends = xorg-xwayland: XWayland support for X11 applications
+	optdepends = xcb-util-wm: XWayland support
+	provides = labwc
+	conflicts = labwc
+	conflicts = labwc-git
+	source = git+https://github.com/FyreX-opensource-design/labwc.git
+
+pkgname = labwc-fyrex-git
+

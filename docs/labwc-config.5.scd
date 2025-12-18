@@ -829,9 +829,10 @@ References:
 	  <action name="Execute" command="rofi -show drun"/>
 	</keybind>
 	```
-	*toggleable="[yes|no]" id="" enabled="[yes|no]"*
-	allows the keybind to be turned on or off via sending a command flag to labwc
-	`--enable-keybind`, `--disable-keybind`, & `--toggle-keybind` followed by the ID of the keybind. 
+
+	*toggleable* [yes|no] id="" enabled="[yes|no]"
+	Allows the keybind to be turned on or off via sending a command flag to labwc
+	\fB--enable-keybind\fR, \fB--disable-keybind\fR, & \fB--toggle-keybind\fR followed by the ID of the keybind. 
 	This is opt in for each keybind.
 	
 	*enabled* [yes|no] sets the initial enabled/disabled state for toggleable keybinds.

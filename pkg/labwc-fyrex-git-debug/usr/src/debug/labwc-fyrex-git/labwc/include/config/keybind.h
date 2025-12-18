@@ -1,0 +1,65 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef LABWC_KEYBIND_H
+#define LABWC_KEYBIND_H
+
+#include <stdbool.h>
+#include <wayland-util.h>
+#include <xkbcommon/xkbcommon.h>
+
+#define MAX_KEYSYMS 32
+#define MAX_KEYCODES 16
+
+struct server;
+
+struct keybind_device_blacklist {
+	char *device_name;
+	struct wl_list link; /* struct keybind.device_blacklist */
+};
+
+struct keybind {
+	uint32_t modifiers;
+	xkb_keysym_t *keysyms;
+	size_t keysyms_len;
+	bool use_syms_only;
+	xkb_keycode_t keycodes[MAX_KEYCODES];
+	size_t keycodes_len;
+	int keycodes_layout;
+	bool allow_when_locked;
+	struct wl_list actions;  /* struct action.link */
+	struct wl_list link;     /* struct rcxml.keybinds */
+	bool on_release;
+	bool toggleable;         /* opt-in flag for toggle support */
+	bool enabled;            /* runtime enabled/disabled state */
+	char *id;                /* optional identifier for toggling */
+	struct wl_list device_blacklist; /* struct keybind_device_blacklist.link */
+};
+
+/**
+ * keybind_create - parse keybind and add to linked list
+ * @keybind: key combination
+ */
+struct keybind *keybind_create(const char *keybind);
+
+void keybind_destroy(struct keybind *keybind);
+
+/**
+ * parse_modifier - parse a string containing a single modifier name (e.g. "S")
+ * into the represented modifier value. returns 0 for invalid modifier names.
+ * @symname: modifier name
+ */
+uint32_t parse_modifier(const char *symname);
+
+bool keybind_the_same(struct keybind *a, struct keybind *b);
+
+bool keybind_contains_keycode(struct keybind *keybind, xkb_keycode_t keycode);
+bool keybind_contains_keysym(struct keybind *keybind, xkb_keysym_t keysym);
+
+void keybind_update_keycodes(struct server *server);
+
+/**
+ * keybind_find_by_id - find a keybind by its id
+ * @id: keybind identifier
+ * Returns the keybind if found, NULL otherwise
+ */
+struct keybind *keybind_find_by_id(const char *id);
+#endif /* LABWC_KEYBIND_H */
