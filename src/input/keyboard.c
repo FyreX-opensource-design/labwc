@@ -534,6 +534,13 @@ handle_compositor_keybindings(struct keyboard *keyboard,
 	}
 
 	/*
+	 * Check if this device is blacklisted from triggering keybinds
+	 */
+	if (keyboard_device_is_blacklisted(keyboard->base.wlr_input_device->name)) {
+		return LAB_KEY_HANDLED_FALSE;
+	}
+
+	/*
 	 * Handle compositor keybinds
 	 */
 	cur_keybind = match_keybinding(server, &keyinfo, keyboard->is_virtual);

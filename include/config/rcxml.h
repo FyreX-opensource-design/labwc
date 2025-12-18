@@ -119,6 +119,7 @@ struct rcxml {
 	enum lab_tristate kb_numlock_enable;
 	bool kb_layout_per_window;
 	struct wl_list keybinds;   /* struct keybind.link */
+	struct wl_list keyboard_blacklist_devices; /* struct keyboard_blacklist_device.link */
 
 	/* mouse */
 	long doubleclick_time;     /* in ms */
@@ -213,5 +214,10 @@ void rcxml_finish(void);
  * FIXME: move this function to somewhere else.
  */
 void append_parsed_actions(xmlNode *node, struct wl_list *list);
+
+/*
+ * Check if a keyboard device is blacklisted from triggering keybinds.
+ */
+bool keyboard_device_is_blacklisted(const char *device_name);
 
 #endif /* LABWC_RCXML_H */

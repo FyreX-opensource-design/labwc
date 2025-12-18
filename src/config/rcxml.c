@@ -564,6 +564,7 @@ fill_keybind(xmlNode *node)
 	lab_xml_get_bool(node, "layoutDependent", &keybind->use_syms_only);
 	lab_xml_get_bool(node, "allowWhenLocked", &keybind->allow_when_locked);
 	lab_xml_get_bool(node, "toggleable", &keybind->toggleable);
+	lab_xml_get_bool(node, "enabled", &keybind->enabled);
 
 	char id_buf[256];
 	if (lab_xml_get_string(node, "id", id_buf, sizeof(id_buf))) {
@@ -642,6 +643,44 @@ fill_touch(xmlNode *node)
 				key, content);
 		}
 	}
+}
+
+struct keyboard_blacklist_device {
+	char *device_name;
+	struct wl_list link; /* struct rcxml.keyboard_blacklist_devices */
+};
+
+static void
+fill_keyboard_blacklist_device(xmlNode *node)
+{
+	struct keyboard_blacklist_device *entry = znew(*entry);
+	wl_list_append(&rc.keyboard_blacklist_devices, &entry->link);
+
+	xmlNode *child;
+	char *key, *content;
+	LAB_XML_FOR_EACH(node, child, key, content) {
+		if (!strcasecmp(key, "name")) {
+			xstrdup_replace(entry->device_name, content);
+		} else {
+			wlr_log(WLR_ERROR, "Unexpected data in keyboard blacklist parser: %s=\"%s\"",
+				key, content);
+		}
+	}
+}
+
+bool
+keyboard_device_is_blacklisted(const char *device_name)
+{
+	if (!device_name) {
+		return false;
+	}
+	struct keyboard_blacklist_device *entry;
+	wl_list_for_each(entry, &rc.keyboard_blacklist_devices, link) {
+		if (entry->device_name && !strcasecmp(entry->device_name, device_name)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 static void
@@ -1056,6 +1095,8 @@ entry(xmlNode *node, char *nodename, char *content)
 		fill_mouse_context(node);
 	} else if (!strcasecmp(nodename, "touch")) {
 		fill_touch(node);
+	} else if (!strcasecmp(nodename, "blacklistDevice.keyboard")) {
+		fill_keyboard_blacklist_device(node);
 	} else if (!strcasecmp(nodename, "device.libinput")) {
 		fill_libinput_category(node);
 	} else if (!strcasecmp(nodename, "regions")) {
@@ -1428,6 +1469,7 @@ rcxml_init(void)
 		wl_list_init(&rc.window_switcher.fields);
 		wl_list_init(&rc.window_rules);
 		wl_list_init(&rc.touch_configs);
+		wl_list_init(&rc.keyboard_blacklist_devices);
 	}
 	has_run = true;
 
@@ -2001,6 +2043,13 @@ rcxml_finish(void)
 		zfree(touch_config->device_name);
 		zfree(touch_config->output_name);
 		zfree(touch_config);
+	}
+
+	struct keyboard_blacklist_device *kb_blacklist, *kb_blacklist_tmp;
+	wl_list_for_each_safe(kb_blacklist, kb_blacklist_tmp, &rc.keyboard_blacklist_devices, link) {
+		wl_list_remove(&kb_blacklist->link);
+		zfree(kb_blacklist->device_name);
+		zfree(kb_blacklist);
 	}
 
 	struct libinput_category *l, *l_tmp;

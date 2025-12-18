@@ -118,6 +118,7 @@ handle_sighup(int signal, void *data)
 	session_environment_init();
 	reload_config_and_theme(server);
 	output_virtual_update_fallback(server);
+	session_run_script("reconfigure");
 	return 0;
 }
 

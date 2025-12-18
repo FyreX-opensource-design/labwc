@@ -8,7 +8,7 @@ labwc - configuration files
 
 Labwc uses openbox-3.6 specification for configuration and theming, but does not
 support all options. The following files form the basis of the labwc
-configuration: rc.xml, menu.xml, autostart, shutdown, environment and xinitrc.
+configuration: rc.xml, menu.xml, autostart, reconfigure, shutdown, environment and xinitrc.
 
 No configuration files are needed to start and run labwc.
 
@@ -34,7 +34,7 @@ alternative.
 The configuration directory location can be overridden with the -C command line
 option.
 
-All configuration and theme files except autostart and shutdown are re-loaded on
+All configuration and theme files except autostart, reconfigure and shutdown are re-loaded on
 receiving signal SIGHUP.
 
 Environment variables may be set within *environment* files, wherein each line
@@ -68,6 +68,13 @@ the environment variables WAYLAND_DISPLAY and (when labwc is built with Xwayland
 support) DISPLAY will be defined. This is the place for executing clients for
 handling background images, panels and other tasks that should run automatically
 when labwc launches.
+
+The *reconfigure* file is executed as a shell script when labwc is told to
+reconfigure (e.g. via `labwc --reconfigure` or the Reconfigure action). All
+environment variables, including WAYLAND_DISPLAY and (when labwc is built with
+Xwayland support) DISPLAY will be available to the script. This file is useful
+for executing commands that should run whenever the configuration is reloaded,
+such as restarting panels or applying output configuration changes.
 
 The *shutdown* file is executed as a shell script when labwc is preparing to
 terminate itself. All environment variables, including WAYLAND_DISPLAY and
@@ -759,7 +766,7 @@ References:
 	Stores the keyboard layout either globally or per window and restores
 	it when switching back to the window. Default is global.
 
-*<keyboard><keybind key="" layoutDependent="" onRelease="" allowWhenLocked="">*
+*<keyboard><keybind key="" layoutDependent="" onRelease="" allowWhenLocked="" toggleable="yes" id="sticky_8">*
 	Define a *key* binding in the format *modifier-key*, where supported
 	modifiers are:
 	- S (shift)
@@ -822,7 +829,15 @@ References:
 	  <action name="Execute" command="rofi -show drun"/>
 	</keybind>
 	```
-
+	*toggleable="[yes|no]" id="" enabled="[yes|no]"*
+	allows the keybind to be turned on or off via sending a command flag to labwc
+	`--enable-keybind`, `--disable-keybind`, & `--toggle-keybind` followed by the ID of the keybind. 
+	This is opt in for each keybind.
+	
+	*enabled* [yes|no] sets the initial enabled/disabled state for toggleable keybinds.
+	If not specified, toggleable keybinds default to enabled. This attribute only
+	has effect when *toggleable* is set to yes.
+	
 *<keyboard><keybind key=""><action name="">*
 	Keybind action. See labwc-actions(5).
 
@@ -854,6 +869,15 @@ References:
 *<keyboard><repeatDelay>*
 	Set the delay before keypresses are repeated in milliseconds.
 	Default is 600.
+
+*<keyboard><blacklistDevice name="">*
+	Blacklist a keyboard device from triggering labwc keybinds. The device
+	name should match the libinput device name (not the event ID). This is
+	useful for devices like gaming keyboards that may have special keys that
+	should be handled by applications rather than the compositor, or if you're using tools like dotool.
+	
+	Multiple blacklistDevice entries can be specified to blacklist multiple
+	devices.
 
 ## MOUSE
 

@@ -3,6 +3,7 @@ Config layout for ~/.config/labwc/
 - environment
 - menu.xml
 - rc.xml
+- reconfigure
 - shutdown
 - themerc-override
 - xinitrc
