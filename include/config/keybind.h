@@ -11,6 +11,11 @@
 
 struct server;
 
+struct keybind_device_blacklist {
+	char *device_name;
+	struct wl_list link; /* struct keybind.device_blacklist */
+};
+
 struct keybind {
 	uint32_t modifiers;
 	xkb_keysym_t *keysyms;
@@ -26,6 +31,7 @@ struct keybind {
 	bool toggleable;         /* opt-in flag for toggle support */
 	bool enabled;            /* runtime enabled/disabled state */
 	char *id;                /* optional identifier for toggling */
+	struct wl_list device_blacklist; /* struct keybind_device_blacklist.link */
 };
 
 /**

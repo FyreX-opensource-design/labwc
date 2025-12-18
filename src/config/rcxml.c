@@ -571,6 +571,29 @@ fill_keybind(xmlNode *node)
 		xstrdup_replace(keybind->id, id_buf);
 	}
 
+	char device_blacklist_buf[1024];
+	if (lab_xml_get_string(node, "deviceBlacklist", device_blacklist_buf, sizeof(device_blacklist_buf))) {
+		gchar **device_names = g_strsplit(device_blacklist_buf, ",", -1);
+		for (size_t i = 0; device_names[i]; i++) {
+			char *device_name = device_names[i];
+			/* Trim whitespace */
+			while (*device_name == ' ' || *device_name == '\t') {
+				device_name++;
+			}
+			char *end = device_name + strlen(device_name) - 1;
+			while (end > device_name && (*end == ' ' || *end == '\t')) {
+				*end = '\0';
+				end--;
+			}
+			if (*device_name) {
+				struct keybind_device_blacklist *entry = znew(*entry);
+				xstrdup_replace(entry->device_name, device_name);
+				wl_list_append(&keybind->device_blacklist, &entry->link);
+			}
+		}
+		g_strfreev(device_names);
+	}
+
 	append_parsed_actions(node, &keybind->actions);
 }
 

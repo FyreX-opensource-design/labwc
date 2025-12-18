@@ -224,6 +224,7 @@ keybind_create(const char *keybind)
 	k->keysyms = xmalloc(k->keysyms_len * sizeof(xkb_keysym_t));
 	memcpy(k->keysyms, keysyms, k->keysyms_len * sizeof(xkb_keysym_t));
 	wl_list_init(&k->actions);
+	wl_list_init(&k->device_blacklist);
 	k->toggleable = false;
 	k->enabled = true;
 	k->id = NULL;
@@ -234,6 +235,13 @@ void
 keybind_destroy(struct keybind *keybind)
 {
 	assert(wl_list_empty(&keybind->actions));
+
+	struct keybind_device_blacklist *entry, *entry_tmp;
+	wl_list_for_each_safe(entry, entry_tmp, &keybind->device_blacklist, link) {
+		wl_list_remove(&entry->link);
+		zfree(entry->device_name);
+		zfree(entry);
+	}
 
 	zfree(keybind->keysyms);
 	zfree(keybind->id);

@@ -837,6 +837,14 @@ References:
 	*enabled* [yes|no] sets the initial enabled/disabled state for toggleable keybinds.
 	If not specified, toggleable keybinds default to enabled. This attribute only
 	has effect when *toggleable* is set to yes.
+
+	*deviceBlacklist* [device1,device2,...]
+	Comma-separated list of device names that should not trigger this keybind.
+	Device names should match the libinput device name (not the event ID). This
+	allows you to disable specific keybinds for specific devices while keeping
+	other keybinds active. For example, you might want to disable a window
+	switcher keybind on a gaming keyboard but keep it active on your main
+	keyboard.
 	
 *<keyboard><keybind key=""><action name="">*
 	Keybind action. See labwc-actions(5).

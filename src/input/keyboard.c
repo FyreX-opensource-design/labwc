@@ -3,6 +3,8 @@
 #include "input/keyboard.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 #include <wlr/backend/session.h>
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_keyboard_group.h>
@@ -187,9 +189,24 @@ handle_modifiers(struct wl_listener *listener, void *data)
 	}
 }
 
+static bool
+keybind_device_is_blacklisted(struct keybind *keybind, const char *device_name)
+{
+	if (!device_name) {
+		return false;
+	}
+	struct keybind_device_blacklist *entry;
+	wl_list_for_each(entry, &keybind->device_blacklist, link) {
+		if (entry->device_name && !strcasecmp(entry->device_name, device_name)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static struct keybind *
 match_keybinding_for_sym(struct server *server, uint32_t modifiers,
-		xkb_keysym_t sym, xkb_keycode_t xkb_keycode)
+		xkb_keysym_t sym, xkb_keycode_t xkb_keycode, const char *device_name)
 {
 	struct keybind *keybind;
 	wl_list_for_each(keybind, &rc.keybinds, link) {
@@ -200,6 +217,9 @@ match_keybinding_for_sym(struct server *server, uint32_t modifiers,
 			continue;
 		}
 		if (view_inhibits_actions(server->active_view, &keybind->actions)) {
+			continue;
+		}
+		if (keybind_device_is_blacklisted(keybind, device_name)) {
 			continue;
 		}
 		if (sym == XKB_KEY_NoSymbol) {
@@ -245,12 +265,13 @@ match_keybinding_for_sym(struct server *server, uint32_t modifiers,
  */
 static struct keybind *
 match_keybinding(struct server *server, struct keyinfo *keyinfo,
-		bool is_virtual)
+		bool is_virtual, const char *device_name)
 {
 	if (!is_virtual) {
 		/* First try keycodes */
 		struct keybind *keybind = match_keybinding_for_sym(server,
-			keyinfo->modifiers, XKB_KEY_NoSymbol, keyinfo->xkb_keycode);
+			keyinfo->modifiers, XKB_KEY_NoSymbol, keyinfo->xkb_keycode,
+			device_name);
 		if (keybind) {
 			wlr_log(WLR_DEBUG, "keycode matched");
 			return keybind;
@@ -261,7 +282,8 @@ match_keybinding(struct server *server, struct keyinfo *keyinfo,
 	for (int i = 0; i < keyinfo->translated.nr_syms; i++) {
 		struct keybind *keybind =
 			match_keybinding_for_sym(server, keyinfo->modifiers,
-				keyinfo->translated.syms[i], keyinfo->xkb_keycode);
+				keyinfo->translated.syms[i], keyinfo->xkb_keycode,
+				device_name);
 		if (keybind) {
 			wlr_log(WLR_DEBUG, "translated keysym matched");
 			return keybind;
@@ -272,7 +294,8 @@ match_keybinding(struct server *server, struct keyinfo *keyinfo,
 	for (int i = 0; i < keyinfo->raw.nr_syms; i++) {
 		struct keybind *keybind =
 			match_keybinding_for_sym(server, keyinfo->modifiers,
-				keyinfo->raw.syms[i], keyinfo->xkb_keycode);
+				keyinfo->raw.syms[i], keyinfo->xkb_keycode,
+				device_name);
 		if (keybind) {
 			wlr_log(WLR_DEBUG, "raw keysym matched");
 			return keybind;
@@ -543,7 +566,8 @@ handle_compositor_keybindings(struct keyboard *keyboard,
 	/*
 	 * Handle compositor keybinds
 	 */
-	cur_keybind = match_keybinding(server, &keyinfo, keyboard->is_virtual);
+	cur_keybind = match_keybinding(server, &keyinfo, keyboard->is_virtual,
+		keyboard->base.wlr_input_device->name);
 	if (cur_keybind && (!locked || cur_keybind->allow_when_locked)) {
 		/*
 		 * Update key-state before action_run() because the action
