@@ -1,6 +1,0 @@
-# Example reconfigure file
-
-# This file is executed as a shell script when labwc is told to reconfigure
-# (e.g. via `labwc --reconfigure` or the Reconfigure action).
-# For further details see labwc-config(5).
-
