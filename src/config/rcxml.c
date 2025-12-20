@@ -594,6 +594,54 @@ fill_keybind(xmlNode *node)
 		g_strfreev(device_names);
 	}
 
+	char condition_command_buf[1024];
+	if (lab_xml_get_string(node, "conditionCommand", condition_command_buf, sizeof(condition_command_buf))) {
+		xstrdup_replace(keybind->condition_command, condition_command_buf);
+	}
+
+	char condition_values_buf[1024];
+	if (lab_xml_get_string(node, "conditionValues", condition_values_buf, sizeof(condition_values_buf))) {
+		gchar **values = g_strsplit(condition_values_buf, ",", -1);
+		size_t count = 0;
+		for (size_t i = 0; values[i]; i++) {
+			char *value = values[i];
+			/* Trim whitespace */
+			while (*value == ' ' || *value == '\t') {
+				value++;
+			}
+			char *end = value + strlen(value) - 1;
+			while (end > value && (*end == ' ' || *end == '\t')) {
+				*end = '\0';
+				end--;
+			}
+			if (*value) {
+				count++;
+			}
+		}
+		if (count > 0) {
+			keybind->condition_values = xmalloc(count * sizeof(char *));
+			keybind->condition_values_len = 0;
+			for (size_t i = 0; values[i]; i++) {
+				char *value = values[i];
+				/* Trim whitespace */
+				while (*value == ' ' || *value == '\t') {
+					value++;
+				}
+				char *end = value + strlen(value) - 1;
+				while (end > value && (*end == ' ' || *end == '\t')) {
+					*end = '\0';
+					end--;
+				}
+				if (*value) {
+					/* Allocate and copy the trimmed value */
+					keybind->condition_values[keybind->condition_values_len] = xstrdup(value);
+					keybind->condition_values_len++;
+				}
+			}
+		}
+		g_strfreev(values);
+	}
+
 	append_parsed_actions(node, &keybind->actions);
 }
 

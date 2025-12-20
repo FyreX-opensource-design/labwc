@@ -2,7 +2,7 @@
 # Contributor: Your Name <your.email@example.com>
 # Git-based PKGBUILD for FyreX fork with device blacklisting features
 pkgname=labwc-fyrex-git
-pkgver=0.9.2.r107.geee2d208
+pkgver=0.9.2.r114.gcd3c126c
 pkgrel=1
 pkgdesc="A wlroots-based window-stacking compositor for Wayland, inspired by Openbox (FyreX fork with device blacklisting features)"
 arch=('x86_64' 'aarch64')

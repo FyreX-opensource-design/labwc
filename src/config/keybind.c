@@ -228,6 +228,9 @@ keybind_create(const char *keybind)
 	k->toggleable = false;
 	k->enabled = true;
 	k->id = NULL;
+	k->condition_command = NULL;
+	k->condition_values = NULL;
+	k->condition_values_len = 0;
 	return k;
 }
 
@@ -245,5 +248,12 @@ keybind_destroy(struct keybind *keybind)
 
 	zfree(keybind->keysyms);
 	zfree(keybind->id);
+	if (keybind->condition_values) {
+		for (size_t i = 0; i < keybind->condition_values_len; i++) {
+			zfree(keybind->condition_values[i]);
+		}
+		zfree(keybind->condition_values);
+	}
+	zfree(keybind->condition_command);
 	zfree(keybind);
 }

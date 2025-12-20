@@ -2,15 +2,20 @@
 #define _POSIX_C_SOURCE 200809L
 #include "input/keyboard.h"
 #include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include <wlr/backend/session.h>
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_keyboard_group.h>
 #include <wlr/types/wlr_seat.h>
 #include "action.h"
+#include "common/buf.h"
 #include "common/macros.h"
+#include "common/mem.h"
+#include "common/spawn.h"
 #include "config/keybind.h"
 #include "config/rcxml.h"
 #include "cycle.h"
@@ -45,6 +50,22 @@ struct keyinfo {
 static bool should_cancel_cycling_on_next_key_release;
 
 static struct keybind *cur_keybind;
+
+#define KEYBIND_CONDITION_TIMEOUT_MS 2000  /* 2 seconds */
+
+struct keybind_condition_context {
+	struct keybind *keybind;
+	struct server *server;
+	struct keyboard *keyboard;
+	uint32_t keycode;
+	uint32_t time_msec;
+	struct buf buf;
+	struct wl_event_source *event_read;
+	struct wl_event_source *event_timeout;
+	pid_t pid;
+	int pipe_fd;
+	bool cleaned_up;
+};
 
 /* Called on --reconfigure to prevent segfault when handling release keybinds */
 void
@@ -505,6 +526,185 @@ handle_cycle_view_key(struct server *server, struct keyinfo *keyinfo)
 	return false;
 }
 
+static void
+keybind_condition_cleanup(struct keybind_condition_context *ctx)
+{
+	if (ctx->cleaned_up) {
+		return;
+	}
+	ctx->cleaned_up = true;
+
+	if (ctx->event_read) {
+		wl_event_source_remove(ctx->event_read);
+		ctx->event_read = NULL;
+	}
+	if (ctx->event_timeout) {
+		wl_event_source_remove(ctx->event_timeout);
+		ctx->event_timeout = NULL;
+	}
+	if (ctx->pipe_fd >= 0) {
+		spawn_piped_close(ctx->pid, ctx->pipe_fd);
+		ctx->pipe_fd = -1;
+	}
+	buf_reset(&ctx->buf);
+	zfree(ctx);
+}
+
+static int
+keybind_condition_timeout(void *data)
+{
+	struct keybind_condition_context *ctx = data;
+	wlr_log(WLR_DEBUG, "Keybind condition check timed out");
+	keybind_condition_cleanup(ctx);
+	return 0;
+}
+
+static int
+keybind_condition_readable(int fd, uint32_t mask, void *data)
+{
+	struct keybind_condition_context *ctx = data;
+	char buffer[4096];
+	ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+
+	if (n < 0) {
+		if (errno == EAGAIN) {
+			return 0;
+		}
+		wlr_log_errno(WLR_ERROR, "Failed to read from condition command pipe");
+		keybind_condition_cleanup(ctx);
+		return 0;
+	}
+
+	if (n == 0) {
+		/* EOF - command finished, check output */
+		const char *output = ctx->buf.data;
+		if (!output) {
+			output = "";
+		}
+		
+		/* Copy output to local buffer before cleanup frees it */
+		char trimmed[4096] = {0};
+		size_t len = strlen(output);
+		
+		/* Trim trailing newlines and whitespace */
+		while (len > 0 && (output[len - 1] == '\n' || output[len - 1] == '\r' || output[len - 1] == ' ' || output[len - 1] == '\t')) {
+			len--;
+		}
+		
+		/* Copy to trimmed buffer */
+		if (len > 0 && len < sizeof(trimmed) - 1) {
+			memcpy(trimmed, output, len);
+			trimmed[len] = '\0';
+		}
+
+		bool matched = false;
+		if (ctx->keybind->condition_values_len > 0) {
+			for (size_t i = 0; i < ctx->keybind->condition_values_len; i++) {
+				if (strcmp(trimmed, ctx->keybind->condition_values[i]) == 0) {
+					matched = true;
+					break;
+				}
+			}
+		} else {
+			/* If no values specified, any non-empty output is considered a match */
+			matched = (len > 0);
+		}
+
+		/* Store keybind and server before cleanup */
+		struct keybind *keybind = ctx->keybind;
+		struct server *server = ctx->server;
+		struct keyboard *keyboard = ctx->keyboard;
+		uint32_t keycode = ctx->keycode;
+		uint32_t time_msec = ctx->time_msec;
+
+		/* Cleanup now that we've copied everything we need */
+		keybind_condition_cleanup(ctx);
+
+		if (matched) {
+			wlr_log(WLR_DEBUG, "Keybind condition matched, executing actions");
+			/* Key is already marked as bound, just execute actions */
+			actions_run(NULL, server, &keybind->actions, NULL);
+		} else {
+			wlr_log(WLR_DEBUG, "Keybind condition did not match (output: '%s'), forwarding key", trimmed);
+			/* Condition didn't match - unmark as bound and forward the keypress */
+			key_state_bound_key_remove(keycode);
+			struct seat *seat = keyboard->base.seat;
+			struct wlr_seat *wlr_seat = seat->seat;
+			struct wlr_keyboard_key_event forward_event = {
+				.keycode = keycode,
+				.state = WL_KEYBOARD_KEY_STATE_PRESSED,
+				.time_msec = time_msec,
+				.update_state = false
+			};
+			if (!input_method_keyboard_grab_forward_key(keyboard, &forward_event)) {
+				wlr_seat_set_keyboard(wlr_seat, keyboard->wlr_keyboard);
+				wlr_seat_keyboard_notify_key(wlr_seat, time_msec, keycode,
+					WL_KEYBOARD_KEY_STATE_PRESSED);
+			}
+		}
+
+		return 0;
+	}
+
+	/* Append to buffer */
+	buffer[n] = '\0';
+	buf_add(&ctx->buf, buffer);
+	return 0;
+}
+
+static bool
+keybind_check_condition_async(struct keybind *keybind, struct server *server,
+		struct keyboard *keyboard, uint32_t keycode, uint32_t time_msec)
+{
+	if (!keybind->condition_command) {
+		/* No condition, execute immediately */
+		return true;
+	}
+
+	wlr_log(WLR_DEBUG, "Checking keybind condition: %s", keybind->condition_command);
+
+	int pipe_fd = 0;
+	pid_t pid = spawn_piped(keybind->condition_command, &pipe_fd);
+	if (pid <= 0) {
+		wlr_log(WLR_ERROR, "Failed to spawn condition command: %s",
+			keybind->condition_command);
+		return false;
+	}
+
+	struct keybind_condition_context *ctx = znew(*ctx);
+	ctx->keybind = keybind;
+	ctx->server = server;
+	ctx->keyboard = keyboard;
+	ctx->keycode = keycode;
+	ctx->time_msec = time_msec;
+	ctx->buf = BUF_INIT;
+	ctx->pid = pid;
+	ctx->pipe_fd = pipe_fd;
+	ctx->event_read = NULL;
+	ctx->event_timeout = NULL;
+	ctx->cleaned_up = false;
+
+	ctx->event_read = wl_event_loop_add_fd(server->wl_event_loop,
+		pipe_fd, WL_EVENT_READABLE, keybind_condition_readable, ctx);
+	if (!ctx->event_read) {
+		wlr_log(WLR_ERROR, "Failed to add condition check file descriptor");
+		keybind_condition_cleanup(ctx);
+		return false;
+	}
+
+	ctx->event_timeout = wl_event_loop_add_timer(server->wl_event_loop,
+		keybind_condition_timeout, ctx);
+	if (!ctx->event_timeout) {
+		wlr_log(WLR_ERROR, "Failed to add condition check timeout");
+		keybind_condition_cleanup(ctx);
+		return false;
+	}
+	wl_event_source_timer_update(ctx->event_timeout, KEYBIND_CONDITION_TIMEOUT_MS);
+
+	/* Condition check is in progress, don't execute actions yet */
+	return false;
+}
+
 static enum lab_key_handled
 handle_compositor_keybindings(struct keyboard *keyboard,
 		struct wlr_keyboard_key_event *event)
@@ -525,7 +725,12 @@ handle_compositor_keybindings(struct keyboard *keyboard,
 				cur_keybind = NULL;
 				return LAB_KEY_HANDLED_TRUE;
 			}
-			actions_run(NULL, server, &cur_keybind->actions, NULL);
+			/* Check condition if present, otherwise execute immediately */
+			if (keybind_check_condition_async(cur_keybind, server, keyboard,
+					event->keycode, event->time_msec)) {
+				actions_run(NULL, server, &cur_keybind->actions, NULL);
+			}
+			/* For on_release, we always consume the release event */
 			return LAB_KEY_HANDLED_TRUE;
 		} else {
 			return handle_key_release(server, event->keycode);
@@ -569,16 +774,25 @@ handle_compositor_keybindings(struct keyboard *keyboard,
 	cur_keybind = match_keybinding(server, &keyinfo, keyboard->is_virtual,
 		keyboard->base.wlr_input_device->name);
 	if (cur_keybind && (!locked || cur_keybind->allow_when_locked)) {
-		/*
-		 * Update key-state before action_run() because the action
-		 * might lead to seat_focus() in which case we pass the
-		 * 'pressed-sent' keys to the new surface.
-		 */
-		key_state_store_pressed_key_as_bound(event->keycode);
 		if (!cur_keybind->on_release) {
-			actions_run(NULL, server, &cur_keybind->actions, NULL);
+			/* Check condition if present, otherwise execute immediately */
+			if (keybind_check_condition_async(cur_keybind, server, keyboard,
+					event->keycode, event->time_msec)) {
+				/* No condition or condition check failed, execute immediately */
+				key_state_store_pressed_key_as_bound(event->keycode);
+				actions_run(NULL, server, &cur_keybind->actions, NULL);
+				return LAB_KEY_HANDLED_TRUE;
+			} else {
+				/* Condition check is async - consume the key for now */
+				/* It will be forwarded later if condition doesn't match */
+				key_state_store_pressed_key_as_bound(event->keycode);
+				return LAB_KEY_HANDLED_TRUE;
+			}
+		} else {
+			/* on_release keybind - always consume on press */
+			key_state_store_pressed_key_as_bound(event->keycode);
+			return LAB_KEY_HANDLED_TRUE;
 		}
-		return LAB_KEY_HANDLED_TRUE;
 	}
 
 	return LAB_KEY_HANDLED_FALSE;

@@ -32,6 +32,9 @@ struct keybind {
 	bool enabled;            /* runtime enabled/disabled state */
 	char *id;                /* optional identifier for toggling */
 	struct wl_list device_blacklist; /* struct keybind_device_blacklist.link */
+	char *condition_command; /* command to run for conditional execution */
+	char **condition_values; /* array of expected output values */
+	size_t condition_values_len; /* number of expected values */
 };
 
 /**
