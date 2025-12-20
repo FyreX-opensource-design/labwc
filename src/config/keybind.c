@@ -2,13 +2,18 @@
 #define _POSIX_C_SOURCE 200809L
 #include "config/keybind.h"
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <glib.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <wlr/types/wlr_keyboard_group.h>
 #include <wlr/util/log.h>
 #include "common/list.h"
 #include "common/mem.h"
+#include "common/spawn.h"
 #include "config/rcxml.h"
 #include "labwc.h"
 
@@ -256,4 +261,58 @@ keybind_destroy(struct keybind *keybind)
 	}
 	zfree(keybind->condition_command);
 	zfree(keybind);
+}
+
+bool
+keybind_check_condition_sync(struct keybind *keybind)
+{
+	if (!keybind->condition_command) {
+		/* No condition, always true */
+		return true;
+	}
+
+	int pipe_fd = 0;
+	pid_t pid = spawn_piped(keybind->condition_command, &pipe_fd);
+	if (pid <= 0) {
+		wlr_log(WLR_ERROR, "Failed to spawn condition command: %s",
+			keybind->condition_command);
+		return false;
+	}
+
+	/* Read output synchronously */
+	char buffer[4096];
+	ssize_t total_read = 0;
+	ssize_t n;
+	while ((n = read(pipe_fd, buffer + total_read,
+			sizeof(buffer) - total_read - 1)) > 0) {
+		total_read += n;
+		if (total_read >= (ssize_t)sizeof(buffer) - 1) {
+			break;
+		}
+	}
+	buffer[total_read] = '\0';
+
+	/* Wait for process to finish */
+	spawn_piped_close(pid, pipe_fd);
+
+	/* Trim trailing newlines and whitespace */
+	size_t len = strlen(buffer);
+	while (len > 0 && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r' ||
+			buffer[len - 1] == ' ' || buffer[len - 1] == '\t')) {
+		len--;
+	}
+	buffer[len] = '\0';
+
+	/* Check if output matches any expected value */
+	if (keybind->condition_values_len > 0) {
+		for (size_t i = 0; i < keybind->condition_values_len; i++) {
+			if (strcmp(buffer, keybind->condition_values[i]) == 0) {
+				return true;
+			}
+		}
+		return false;
+	} else {
+		/* If no values specified, any non-empty output is considered a match */
+		return (len > 0);
+	}
 }

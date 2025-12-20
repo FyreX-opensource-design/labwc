@@ -1580,8 +1580,13 @@ run_action(struct view *view, struct server *server, struct action *action,
 			wlr_log(WLR_ERROR, "Keybind with id '%s' is not toggleable", id);
 			break;
 		}
-		keybind->enabled = true;
-		wlr_log(WLR_INFO, "Enabled keybind with id '%s'", id);
+		/* Check condition before enabling */
+		if (keybind_check_condition_sync(keybind)) {
+			keybind->enabled = true;
+			wlr_log(WLR_INFO, "Enabled keybind with id '%s'", id);
+		} else {
+			wlr_log(WLR_INFO, "Keybind with id '%s' condition not met, not enabling", id);
+		}
 		break;
 	}
 	case ACTION_TYPE_DISABLE_KEYBIND: {
@@ -1618,9 +1623,19 @@ run_action(struct view *view, struct server *server, struct action *action,
 			wlr_log(WLR_ERROR, "Keybind with id '%s' is not toggleable", id);
 			break;
 		}
-		keybind->enabled = !keybind->enabled;
-		wlr_log(WLR_INFO, "%s keybind with id '%s'",
-			keybind->enabled ? "Enabled" : "Disabled", id);
+		/* Toggle: if currently enabled, disable; if disabled, enable only if condition is met */
+		if (keybind->enabled) {
+			keybind->enabled = false;
+			wlr_log(WLR_INFO, "Disabled keybind with id '%s'", id);
+		} else {
+			/* Check condition before enabling */
+			if (keybind_check_condition_sync(keybind)) {
+				keybind->enabled = true;
+				wlr_log(WLR_INFO, "Enabled keybind with id '%s'", id);
+			} else {
+				wlr_log(WLR_INFO, "Keybind with id '%s' condition not met, not enabling", id);
+			}
+		}
 		break;
 	}
 	case ACTION_TYPE_INVALID:

@@ -65,4 +65,11 @@ void keybind_update_keycodes(struct server *server);
  * Returns the keybind if found, NULL otherwise
  */
 struct keybind *keybind_find_by_id(const char *id);
+
+/**
+ * keybind_check_condition_sync - check if keybind condition is met synchronously
+ * @keybind: keybind to check condition for
+ * Returns true if condition is met (or no condition), false otherwise
+ */
+bool keybind_check_condition_sync(struct keybind *keybind);
 #endif /* LABWC_KEYBIND_H */

@@ -564,7 +564,9 @@ fill_keybind(xmlNode *node)
 	lab_xml_get_bool(node, "layoutDependent", &keybind->use_syms_only);
 	lab_xml_get_bool(node, "allowWhenLocked", &keybind->allow_when_locked);
 	lab_xml_get_bool(node, "toggleable", &keybind->toggleable);
-	lab_xml_get_bool(node, "enabled", &keybind->enabled);
+	
+	bool enabled_from_xml = false;
+	lab_xml_get_bool(node, "enabled", &enabled_from_xml);
 
 	char id_buf[256];
 	if (lab_xml_get_string(node, "id", id_buf, sizeof(id_buf))) {
@@ -640,6 +642,17 @@ fill_keybind(xmlNode *node)
 			}
 		}
 		g_strfreev(values);
+	}
+
+	/* If keybind has a condition, check it before setting enabled state */
+	/* This must be done after parsing condition_command and condition_values */
+	if (enabled_from_xml && keybind->condition_command) {
+		keybind->enabled = keybind_check_condition_sync(keybind);
+		if (!keybind->enabled) {
+			wlr_log(WLR_DEBUG, "Keybind condition not met at startup, starting disabled");
+		}
+	} else {
+		keybind->enabled = enabled_from_xml;
 	}
 
 	append_parsed_actions(node, &keybind->actions);
