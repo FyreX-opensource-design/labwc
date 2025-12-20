@@ -7,3 +7,6 @@
 
 # Qt Creator settings
 *.user
+
+build/
+pkgs/
