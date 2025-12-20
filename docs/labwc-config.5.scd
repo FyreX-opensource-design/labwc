@@ -766,7 +766,7 @@ References:
 	Stores the keyboard layout either globally or per window and restores
 	it when switching back to the window. Default is global.
 
-*<keyboard><keybind key="" layoutDependent="" onRelease="" allowWhenLocked="" toggleable="yes" id="sticky_8">*
+*<keyboard><keybind key="" layoutDependent="" onRelease="" allowWhenLocked="" toggleable="yes" id="sticky_8" deviceBlacklist="device A,device B">*
 	Define a *key* binding in the format *modifier-key*, where supported
 	modifiers are:
 	- S (shift)
@@ -846,6 +846,29 @@ References:
 	other keybinds active. For example, you might want to disable a window
 	switcher keybind on a gaming keyboard but keep it active on your main
 	keyboard.
+
+	*conditionCommand* "<command>"
+	Specifies a shell command to be run when this keybind is evaluated. The output
+	of this command is compared against the values supplied to *conditionValues*.
+	This allows keybinds to be enabled or disabled dynamically depending on system
+	state or environment variables. The command is executed in the shell and its
+	standard output is used for the comparison.
+
+	*conditionValues* "<value>[,<value2>,...]"
+	A comma-separated list of values. If the output of *conditionCommand* matches
+	any value in this list (whitespace-trimmed), the keybind is considered active
+	and will be triggered. If omitted, the keybind is always active (unless other
+	conditions deny it).
+
+	For example, to only activate a keybind when the environment variable
+	STICKY_KEYS is set to "true", use:
+	```xml
+	<keybind key="e" conditionCommand="echo $STICKY_KEYS" conditionValues="true">
+		<action name="Execute">
+			<command>notify-send test</command>
+		</action>
+	</keybind>
+	```
 	
 *<keyboard><keybind key=""><action name="">*
 	Keybind action. See labwc-actions(5).
