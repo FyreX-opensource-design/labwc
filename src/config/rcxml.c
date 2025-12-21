@@ -565,8 +565,11 @@ fill_keybind(xmlNode *node)
 	lab_xml_get_bool(node, "allowWhenLocked", &keybind->allow_when_locked);
 	lab_xml_get_bool(node, "toggleable", &keybind->toggleable);
 	
-	bool enabled_from_xml = false;
-	lab_xml_get_bool(node, "enabled", &enabled_from_xml);
+	bool enabled_from_xml = true;  /* Default to enabled */
+	bool enabled_specified = false;
+	if (lab_xml_get_bool(node, "enabled", &enabled_from_xml)) {
+		enabled_specified = true;
+	}
 
 	char id_buf[256];
 	if (lab_xml_get_string(node, "id", id_buf, sizeof(id_buf))) {
@@ -591,6 +594,31 @@ fill_keybind(xmlNode *node)
 				struct keybind_device_blacklist *entry = znew(*entry);
 				xstrdup_replace(entry->device_name, device_name);
 				wl_list_append(&keybind->device_blacklist, &entry->link);
+			}
+		}
+		g_strfreev(device_names);
+	}
+
+	char device_whitelist_buf[1024];
+	if (lab_xml_get_string(node, "deviceWhitelist", device_whitelist_buf, sizeof(device_whitelist_buf))) {
+		gchar **device_names = g_strsplit(device_whitelist_buf, ",", -1);
+		for (size_t i = 0; device_names[i]; i++) {
+			char *device_name = device_names[i];
+			/* Trim whitespace */
+			while (*device_name == ' ' || *device_name == '\t') {
+				device_name++;
+			}
+			char *end = device_name + strlen(device_name) - 1;
+			while (end > device_name && (*end == ' ' || *end == '\t')) {
+				*end = '\0';
+				end--;
+			}
+			if (*device_name) {
+				struct keybind_device_whitelist *entry = znew(*entry);
+				xstrdup_replace(entry->device_name, device_name);
+				wl_list_append(&keybind->device_whitelist, &entry->link);
+				wlr_log(WLR_INFO, "keybind whitelist: added device '%s' to whitelist",
+					entry->device_name);
 			}
 		}
 		g_strfreev(device_names);
@@ -646,16 +674,26 @@ fill_keybind(xmlNode *node)
 
 	/* If keybind has a condition, check it before setting enabled state */
 	/* This must be done after parsing condition_command and condition_values */
-	if (enabled_from_xml && keybind->condition_command) {
+	if (enabled_specified && enabled_from_xml && keybind->condition_command) {
 		keybind->enabled = keybind_check_condition_sync(keybind);
 		if (!keybind->enabled) {
 			wlr_log(WLR_DEBUG, "Keybind condition not met at startup, starting disabled");
 		}
-	} else {
+	} else if (enabled_specified) {
+		/* Only override enabled state if it was explicitly specified in XML */
 		keybind->enabled = enabled_from_xml;
 	}
+	/* Otherwise, keep the default enabled=true from keybind_create() */
 
 	append_parsed_actions(node, &keybind->actions);
+	
+	/* Log action count for debugging */
+	int action_count = 0;
+	struct action *action;
+	wl_list_for_each(action, &keybind->actions, link) {
+		action_count++;
+	}
+	wlr_log(WLR_INFO, "keybind for key='%s': added %d action(s)", keyname, action_count);
 }
 
 static void

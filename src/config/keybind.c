@@ -212,6 +212,8 @@ keybind_create(const char *keybind)
 				break;
 			}
 			keysyms[k->keysyms_len] = sym;
+			wlr_log(WLR_INFO, "keybind_create: added keysym %u (0x%x) for keybind '%s'", 
+				sym, sym, keybind);
 			k->keysyms_len++;
 			if (k->keysyms_len == MAX_KEYSYMS) {
 				wlr_log(WLR_ERROR, "There are a lot of fingers involved. "
@@ -230,6 +232,7 @@ keybind_create(const char *keybind)
 	memcpy(k->keysyms, keysyms, k->keysyms_len * sizeof(xkb_keysym_t));
 	wl_list_init(&k->actions);
 	wl_list_init(&k->device_blacklist);
+	wl_list_init(&k->device_whitelist);
 	k->toggleable = false;
 	k->enabled = true;
 	k->id = NULL;
@@ -249,6 +252,13 @@ keybind_destroy(struct keybind *keybind)
 		wl_list_remove(&entry->link);
 		zfree(entry->device_name);
 		zfree(entry);
+	}
+
+	struct keybind_device_whitelist *whitelist_entry, *whitelist_entry_tmp;
+	wl_list_for_each_safe(whitelist_entry, whitelist_entry_tmp, &keybind->device_whitelist, link) {
+		wl_list_remove(&whitelist_entry->link);
+		zfree(whitelist_entry->device_name);
+		zfree(whitelist_entry);
 	}
 
 	zfree(keybind->keysyms);

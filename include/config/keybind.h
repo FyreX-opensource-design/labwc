@@ -16,6 +16,11 @@ struct keybind_device_blacklist {
 	struct wl_list link; /* struct keybind.device_blacklist */
 };
 
+struct keybind_device_whitelist {
+	char *device_name;
+	struct wl_list link; /* struct keybind.device_whitelist */
+};
+
 struct keybind {
 	uint32_t modifiers;
 	xkb_keysym_t *keysyms;
@@ -32,6 +37,7 @@ struct keybind {
 	bool enabled;            /* runtime enabled/disabled state */
 	char *id;                /* optional identifier for toggling */
 	struct wl_list device_blacklist; /* struct keybind_device_blacklist.link */
+	struct wl_list device_whitelist; /* struct keybind_device_whitelist.link */
 	char *condition_command; /* command to run for conditional execution */
 	char **condition_values; /* array of expected output values */
 	size_t condition_values_len; /* number of expected values */

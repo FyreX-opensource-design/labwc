@@ -225,34 +225,94 @@ keybind_device_is_blacklisted(struct keybind *keybind, const char *device_name)
 	return false;
 }
 
+static bool
+keybind_device_is_whitelisted(struct keybind *keybind, const char *device_name)
+{
+	/* If whitelist is empty, all devices are allowed */
+	if (wl_list_empty(&keybind->device_whitelist)) {
+		return true;
+	}
+	if (!device_name) {
+		wlr_log(WLR_INFO, "keybind whitelist: device_name is NULL, blocking");
+		return false;
+	}
+	wlr_log(WLR_INFO, "keybind whitelist: checking device '%s' against whitelist", device_name);
+	struct keybind_device_whitelist *entry;
+	wl_list_for_each(entry, &keybind->device_whitelist, link) {
+		if (entry->device_name) {
+			wlr_log(WLR_INFO, "keybind whitelist: comparing '%s' == '%s'", 
+				entry->device_name, device_name);
+			if (!strcasecmp(entry->device_name, device_name)) {
+				wlr_log(WLR_INFO, "keybind whitelist: MATCH FOUND!");
+				return true;
+			}
+		}
+	}
+	wlr_log(WLR_INFO, "keybind whitelist: NO MATCH for device '%s'", device_name);
+	return false;
+}
+
 static struct keybind *
 match_keybinding_for_sym(struct server *server, uint32_t modifiers,
 		xkb_keysym_t sym, xkb_keycode_t xkb_keycode, const char *device_name)
 {
 	struct keybind *keybind;
+	int keybind_count = 0;
 	wl_list_for_each(keybind, &rc.keybinds, link) {
+		keybind_count++;
 		if (modifiers ^ keybind->modifiers) {
+			wlr_log(WLR_DEBUG, "keybind #%d: modifier mismatch (have=0x%x, need=0x%x)",
+				keybind_count, modifiers, keybind->modifiers);
 			continue;
 		}
 		if (!keybind->enabled) {
+			/* Log which keybind this is for debugging */
+			if (keybind->keysyms_len > 0) {
+				wlr_log(WLR_INFO, "keybind #%d: disabled (keysym=%u/0x%x, modifiers=0x%x)",
+					keybind_count, keybind->keysyms[0], keybind->keysyms[0], keybind->modifiers);
+			} else {
+				wlr_log(WLR_DEBUG, "keybind #%d: disabled", keybind_count);
+			}
 			continue;
 		}
 		if (view_inhibits_actions(server->active_view, &keybind->actions)) {
+			wlr_log(WLR_DEBUG, "keybind #%d: view inhibits actions", keybind_count);
 			continue;
 		}
 		if (keybind_device_is_blacklisted(keybind, device_name)) {
+			wlr_log(WLR_DEBUG, "keybind #%d: blacklisted", keybind_count);
 			continue;
+		}
+		if (!keybind_device_is_whitelisted(keybind, device_name)) {
+			wlr_log(WLR_INFO, "keybind #%d: blocked by whitelist check", keybind_count);
+			continue;
+		}
+		wlr_log(WLR_INFO, "keybind #%d: passed whitelist check, checking key match (sym=%u/0x%x, keycode=%u)...",
+			keybind_count, sym, sym, xkb_keycode);
+		wlr_log(WLR_INFO, "keybind #%d: has %zu keysyms, modifiers=0x%x", 
+			keybind_count, keybind->keysyms_len, keybind->modifiers);
+		for (size_t i = 0; i < keybind->keysyms_len; i++) {
+			wlr_log(WLR_INFO, "keybind #%d: keysym[%zu]=%u (0x%x)", 
+				keybind_count, i, keybind->keysyms[i], keybind->keysyms[i]);
 		}
 		if (sym == XKB_KEY_NoSymbol) {
 			/* Use keycodes */
 			if (keybind_contains_keycode(keybind, xkb_keycode)) {
+				wlr_log(WLR_INFO, "keybind #%d: KEYCODE MATCH! returning keybind", keybind_count);
 				return keybind;
+			} else {
+				wlr_log(WLR_INFO, "keybind #%d: keycode %u not in keybind", keybind_count, xkb_keycode);
 			}
 		} else {
 			/* Use syms */
-			if (keybind_contains_keysym(keybind,
-					xkb_keysym_to_lower(sym))) {
+			xkb_keysym_t lower_sym = xkb_keysym_to_lower(sym);
+			wlr_log(WLR_INFO, "keybind #%d: checking if keysym %u (lower=%u) matches", 
+				keybind_count, sym, lower_sym);
+			if (keybind_contains_keysym(keybind, lower_sym)) {
+				wlr_log(WLR_INFO, "keybind #%d: KEYSYM MATCH! returning keybind", keybind_count);
 				return keybind;
+			} else {
+				wlr_log(WLR_INFO, "keybind #%d: keysym %u not in keybind", keybind_count, lower_sym);
 			}
 		}
 	}
@@ -288,6 +348,10 @@ static struct keybind *
 match_keybinding(struct server *server, struct keyinfo *keyinfo,
 		bool is_virtual, const char *device_name)
 {
+	wlr_log(WLR_INFO, "match_keybinding: device='%s', is_virtual=%d, modifiers=0x%x",
+		device_name ? device_name : "NULL", is_virtual, keyinfo->modifiers);
+	wlr_log(WLR_INFO, "match_keybinding: translated syms=%d, raw syms=%d",
+		keyinfo->translated.nr_syms, keyinfo->raw.nr_syms);
 	if (!is_virtual) {
 		/* First try keycodes */
 		struct keybind *keybind = match_keybinding_for_sym(server,
@@ -301,27 +365,32 @@ match_keybinding(struct server *server, struct keyinfo *keyinfo,
 
 	/* Then fall back to keysyms */
 	for (int i = 0; i < keyinfo->translated.nr_syms; i++) {
+		wlr_log(WLR_INFO, "match_keybinding: trying translated keysym[%d]=%u", 
+			i, keyinfo->translated.syms[i]);
 		struct keybind *keybind =
 			match_keybinding_for_sym(server, keyinfo->modifiers,
 				keyinfo->translated.syms[i], keyinfo->xkb_keycode,
 				device_name);
 		if (keybind) {
-			wlr_log(WLR_DEBUG, "translated keysym matched");
+			wlr_log(WLR_INFO, "translated keysym matched");
 			return keybind;
 		}
 	}
 
 	/* And finally test for keysyms without modifier */
 	for (int i = 0; i < keyinfo->raw.nr_syms; i++) {
+		wlr_log(WLR_INFO, "match_keybinding: trying raw keysym[%d]=%u", 
+			i, keyinfo->raw.syms[i]);
 		struct keybind *keybind =
 			match_keybinding_for_sym(server, keyinfo->modifiers,
 				keyinfo->raw.syms[i], keyinfo->xkb_keycode,
 				device_name);
 		if (keybind) {
-			wlr_log(WLR_DEBUG, "raw keysym matched");
+			wlr_log(WLR_INFO, "raw keysym matched");
 			return keybind;
 		}
 	}
+	wlr_log(WLR_INFO, "match_keybinding: no keybind matched");
 
 	return NULL;
 }
@@ -773,14 +842,30 @@ handle_compositor_keybindings(struct keyboard *keyboard,
 	 */
 	cur_keybind = match_keybinding(server, &keyinfo, keyboard->is_virtual,
 		keyboard->base.wlr_input_device->name);
+	wlr_log(WLR_INFO, "match_keybinding returned: %s", cur_keybind ? "keybind found" : "NULL");
+	if (cur_keybind) {
+		wlr_log(WLR_INFO, "keybind found: locked=%d, allow_when_locked=%d", 
+			locked, cur_keybind->allow_when_locked);
+	}
 	if (cur_keybind && (!locked || cur_keybind->allow_when_locked)) {
+		wlr_log(WLR_INFO, "keybind passed lock check, executing...");
 		if (!cur_keybind->on_release) {
 			/* Check condition if present, otherwise execute immediately */
 			if (keybind_check_condition_async(cur_keybind, server, keyboard,
 					event->keycode, event->time_msec)) {
 				/* No condition or condition check failed, execute immediately */
+				int action_count = 0;
+				struct action *action;
+				wl_list_for_each(action, &cur_keybind->actions, link) {
+					action_count++;
+				}
+				wlr_log(WLR_INFO, "keybind: executing actions_run with %d action(s)", action_count);
+				if (action_count == 0) {
+					wlr_log(WLR_ERROR, "keybind: WARNING - no actions in keybind!");
+				}
 				key_state_store_pressed_key_as_bound(event->keycode);
 				actions_run(NULL, server, &cur_keybind->actions, NULL);
+				wlr_log(WLR_INFO, "keybind: actions_run completed");
 				return LAB_KEY_HANDLED_TRUE;
 			} else {
 				/* Condition check is async - consume the key for now */

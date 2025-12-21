@@ -766,7 +766,7 @@ References:
 	Stores the keyboard layout either globally or per window and restores
 	it when switching back to the window. Default is global.
 
-*<keyboard><keybind key="" layoutDependent="" onRelease="" allowWhenLocked="" toggleable="yes" id="sticky_8" deviceBlacklist="device A,device B">*
+*<keyboard><keybind key="" layoutDependent="" onRelease="" allowWhenLocked="" toggleable="yes" id="sticky_8" deviceBlacklist="device A,device B" deviceWhitelist="device C,device D">*
 	Define a *key* binding in the format *modifier-key*, where supported
 	modifiers are:
 	- S (shift)
@@ -846,6 +846,15 @@ References:
 	other keybinds active. For example, you might want to disable a window
 	switcher keybind on a gaming keyboard but keep it active on your main
 	keyboard.
+
+	*deviceWhitelist* [device1,device2,...]
+	Comma-separated list of device names that should trigger this keybind. If
+	specified, only devices in this list will trigger the keybind. Device names
+	should match the libinput device name (not the event ID). If a device is
+	both in the whitelist and blacklist, the blacklist takes precedence and the
+	device will not trigger the keybind. This allows you to restrict keybinds
+	to specific devices, for example binding a function key to a specific
+	keyboard while ignoring it on other keyboards.
 
 	*conditionCommand* "<command>"
 	Specifies a shell command to be run when this keybind is evaluated. The output
