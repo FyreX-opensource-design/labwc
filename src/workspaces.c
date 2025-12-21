@@ -5,6 +5,7 @@
 #include <cairo.h>
 #include <pango/pangocairo.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -398,6 +399,20 @@ workspaces_init(struct server *server)
 	wl_list_for_each(conf, &rc.workspace_config.workspaces, link) {
 		add_workspace(server, conf->name);
 	}
+
+	/* Initialize workspace status file */
+	if (server->workspaces.current) {
+		char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+		if (runtime_dir) {
+			char status_file[256];
+			snprintf(status_file, sizeof(status_file), "%s/labwc-workspace-current", runtime_dir);
+			FILE *f = fopen(status_file, "w");
+			if (f) {
+				fprintf(f, "%s\n", server->workspaces.current->name);
+				fclose(f);
+			}
+		}
+	}
 }
 
 /*
@@ -479,6 +494,18 @@ workspaces_switch_to(struct workspace *target, bool update_focus)
 
 	lab_cosmic_workspace_set_active(target->cosmic_workspace, true);
 	lab_ext_workspace_set_active(target->ext_workspace, true);
+
+	/* Update workspace status file for querying */
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (runtime_dir) {
+		char status_file[256];
+		snprintf(status_file, sizeof(status_file), "%s/labwc-workspace-current", runtime_dir);
+		FILE *f = fopen(status_file, "w");
+		if (f) {
+			fprintf(f, "%s\n", target->name);
+			fclose(f);
+		}
+	}
 }
 
 void

@@ -159,6 +159,70 @@ process_keybind_command(struct server *server, const char *command, const char *
 	}
 }
 
+static void
+update_workspace_status_file(struct server *server)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		return;
+	}
+
+	char status_file[256];
+	snprintf(status_file, sizeof(status_file), "%s/labwc-workspace-current", runtime_dir);
+
+	FILE *f = fopen(status_file, "w");
+	if (!f) {
+		return;
+	}
+
+	if (server->workspaces.current) {
+		fprintf(f, "%s\n", server->workspaces.current->name);
+	}
+	fclose(f);
+}
+
+static void
+process_workspace_command(struct server *server, const char *command, const char *arg)
+{
+	struct workspace *target = NULL;
+
+	if (!strcmp(command, "switch")) {
+		if (!arg) {
+			wlr_log(WLR_ERROR, "workspace switch command requires an argument");
+			return;
+		}
+		target = workspaces_find(server->workspaces.current, arg, false);
+		if (target) {
+			workspaces_switch_to(target, true);
+			wlr_log(WLR_INFO, "Switched to workspace '%s'", target->name);
+		} else {
+			wlr_log(WLR_ERROR, "Workspace '%s' not found", arg);
+		}
+	} else if (!strcmp(command, "next")) {
+		target = workspaces_find(server->workspaces.current, "right", false);
+		if (target) {
+			workspaces_switch_to(target, true);
+			wlr_log(WLR_INFO, "Switched to next workspace '%s'", target->name);
+		} else {
+			wlr_log(WLR_ERROR, "No next workspace available");
+		}
+	} else if (!strcmp(command, "prev")) {
+		target = workspaces_find(server->workspaces.current, "left", false);
+		if (target) {
+			workspaces_switch_to(target, true);
+			wlr_log(WLR_INFO, "Switched to previous workspace '%s'", target->name);
+		} else {
+			wlr_log(WLR_ERROR, "No previous workspace available");
+		}
+	} else {
+		wlr_log(WLR_ERROR, "Unknown workspace command: %s", command);
+		return;
+	}
+
+	/* Update status file after workspace change */
+	update_workspace_status_file(server);
+}
+
 static int
 handle_sigusr1(int signal, void *data)
 {
@@ -168,22 +232,43 @@ handle_sigusr1(int signal, void *data)
 		return 0;
 	}
 
+	/* Check for keybind command */
 	char cmd_file[256];
 	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-keybind-cmd", runtime_dir);
 
 	FILE *f = fopen(cmd_file, "r");
-	if (!f) {
+	if (f) {
+		char command[32];
+		char id[256];
+		if (fscanf(f, "%31s %255s", command, id) == 2) {
+			process_keybind_command(server, command, id);
+		}
+		fclose(f);
+		unlink(cmd_file);
 		return 0;
 	}
 
-	char command[32];
-	char id[256];
-	if (fscanf(f, "%31s %255s", command, id) == 2) {
-		process_keybind_command(server, command, id);
+	/* Check for workspace command */
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-workspace-cmd", runtime_dir);
+
+	f = fopen(cmd_file, "r");
+	if (f) {
+		char line[288]; /* 32 + 1 + 255 for command + space + arg */
+		if (fgets(line, sizeof(line), f)) {
+			char command[32];
+			char arg[256];
+			/* Try to read command with optional argument */
+			if (sscanf(line, "%31s %255s", command, arg) == 2) {
+				process_workspace_command(server, command, arg);
+			} else if (sscanf(line, "%31s", command) == 1) {
+				process_workspace_command(server, command, NULL);
+			}
+		}
+		fclose(f);
+		unlink(cmd_file);
+		return 0;
 	}
 
-	fclose(f);
-	unlink(cmd_file);
 	return 0;
 }
 

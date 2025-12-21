@@ -36,6 +36,10 @@ static const struct option long_options[] = {
 	{"enable-keybind", required_argument, NULL, 1000},
 	{"disable-keybind", required_argument, NULL, 1001},
 	{"toggle-keybind", required_argument, NULL, 1002},
+	{"workspace-switch", required_argument, NULL, 2000},
+	{"workspace-next", no_argument, NULL, 2001},
+	{"workspace-prev", no_argument, NULL, 2002},
+	{"workspace-current", no_argument, NULL, 2003},
 	{0, 0, 0, 0}
 };
 
@@ -54,7 +58,11 @@ static const char labwc_usage[] =
 "  -V, --verbose            Enable more verbose logging\n"
 "      --enable-keybind <id>   Enable a toggleable keybind\n"
 "      --disable-keybind <id>  Disable a toggleable keybind\n"
-"      --toggle-keybind <id>   Toggle a toggleable keybind\n";
+"      --toggle-keybind <id>   Toggle a toggleable keybind\n"
+"      --workspace-switch <number|name>  Switch to a workspace by number or name\n"
+"      --workspace-next          Switch to next workspace\n"
+"      --workspace-prev          Switch to previous workspace\n"
+"      --workspace-current       Query the active workspace\n";
 
 static void
 usage(void)
@@ -162,6 +170,77 @@ send_keybind_command(const char *command, const char *id)
 	send_signal_to_labwc_pid(SIGUSR1);
 }
 
+static void
+send_workspace_command(const char *command, const char *arg)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *labwc_pid = getenv("LABWC_PID");
+	if (!labwc_pid) {
+		fprintf(stderr, "LABWC_PID not set - labwc is not running\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char cmd_file[256];
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-workspace-cmd", runtime_dir);
+
+	FILE *f = fopen(cmd_file, "w");
+	if (!f) {
+		perror("Failed to open command file");
+		exit(EXIT_FAILURE);
+	}
+
+	if (arg) {
+		fprintf(f, "%s %s\n", command, arg);
+	} else {
+		fprintf(f, "%s\n", command);
+	}
+	fclose(f);
+
+	/* Trigger the running instance to process the command */
+	send_signal_to_labwc_pid(SIGUSR1);
+}
+
+static void
+query_workspace_current(void)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char status_file[256];
+	snprintf(status_file, sizeof(status_file), "%s/labwc-workspace-current", runtime_dir);
+
+	FILE *f = fopen(status_file, "r");
+	if (!f) {
+		fprintf(stderr, "Failed to read workspace status file\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char workspace[256];
+	if (fgets(workspace, sizeof(workspace), f)) {
+		/* Remove trailing newline if present */
+		size_t len = strlen(workspace);
+		if (len > 0 && workspace[len - 1] == '\n') {
+			workspace[len - 1] = '\0';
+		}
+		printf("%s\n", workspace);
+	} else {
+		fprintf(stderr, "Failed to read workspace name\n");
+		fclose(f);
+		exit(EXIT_FAILURE);
+	}
+
+	fclose(f);
+	exit(0);
+}
+
 struct idle_ctx {
 	struct server *server;
 	const char *primary_client;
@@ -245,6 +324,18 @@ main(int argc, char *argv[])
 		case 1002: /* --toggle-keybind */
 			send_keybind_command("toggle", optarg);
 			exit(0);
+		case 2000: /* --workspace-switch */
+			send_workspace_command("switch", optarg);
+			exit(0);
+		case 2001: /* --workspace-next */
+			send_workspace_command("next", NULL);
+			exit(0);
+		case 2002: /* --workspace-prev */
+			send_workspace_command("prev", NULL);
+			exit(0);
+		case 2003: /* --workspace-current */
+			query_workspace_current();
+			break;
 		case 'h':
 		default:
 			usage();
