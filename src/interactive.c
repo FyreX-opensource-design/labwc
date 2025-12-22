@@ -313,8 +313,55 @@ interactive_finish(struct view *view)
 	}
 
 	if (view->server->input_mode == LAB_INPUT_STATE_MOVE) {
+		bool was_snapped = false;
 		if (!snap_to_region(view)) {
-			snap_to_edge(view);
+			was_snapped = snap_to_edge(view);
+		} else {
+			was_snapped = true;
+		}
+
+		/* Rearrange tiled windows when a window is moved in tiling mode */
+		/* In tiling mode, override edge/region snapping to keep windows tiled */
+		if (view->server->tiling_mode &&
+		    !view->minimized && !view->fullscreen &&
+		    !view_is_always_on_top(view) && !view_is_always_on_bottom(view) &&
+		    window_rules_get_property(view, "fixedPosition") != LAB_PROP_TRUE) {
+			/* Check if this view should be tiled */
+			enum property tile_prop = window_rules_get_property(view, "tile");
+			if (tile_prop != LAB_PROP_FALSE) {
+				/* If window was snapped, untile it first */
+				if (was_snapped && view_is_tiled(view)) {
+					view_set_untiled(view);
+				}
+				desktop_arrange_tiled(view->server);
+			}
+		}
+	} else if (view->server->input_mode == LAB_INPUT_STATE_RESIZE) {
+		/* Rearrange tiled windows when a window is resized in tiling mode */
+		if (view->server->tiling_mode &&
+		    !view->minimized && !view->fullscreen &&
+		    !view_is_always_on_top(view) && !view_is_always_on_bottom(view) &&
+		    window_rules_get_property(view, "fixedPosition") != LAB_PROP_TRUE) {
+			/* Check if this view should be tiled */
+			enum property tile_prop = window_rules_get_property(view, "tile");
+			if (tile_prop != LAB_PROP_FALSE) {
+				/* In smart mode (grid_mode=false), preserve the resized window's geometry */
+				if (!view->server->tiling_grid_mode) {
+					/* Store the resized window's current geometry to preserve it */
+					view->server->resized_view_geometry = view->current;
+					view->server->resized_view = view;
+					/* Untile the resized window so it can keep its new size */
+					if (view_is_tiled(view)) {
+						view_set_untiled(view);
+					}
+				}
+				/* Arrange all windows - this will preserve the resized one in smart mode */
+				desktop_arrange_tiled(view->server);
+				/* Clear the resized view tracking after arrangement */
+				if (!view->server->tiling_grid_mode) {
+					view->server->resized_view = NULL;
+				}
+			}
 		}
 	}
 

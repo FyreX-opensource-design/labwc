@@ -76,6 +76,42 @@ the `--exit` and `--reconfigure` options use.
 *-V, --verbose*
 	Enable more verbose logging
 
+*--enable-keybind* <id>
+	Enable a toggleable keybind
+
+*--disable-keybind* <id>
+	Disable a toggleable keybind
+
+*--toggle-keybind* <id>
+	Toggle a toggleable keybind
+
+*--workspace-switch* <number|name>
+	Switch to a workspace by number or name
+
+*--workspace-next*
+	Switch to next workspace
+
+*--workspace-prev*
+	Switch to previous workspace
+
+*--workspace-current*
+	Query the active workspace
+
+*--enable-tiling*
+	Enable automatic tiling mode
+
+*--disable-tiling*
+	Disable automatic tiling mode
+
+*--toggle-tiling*
+	Toggle automatic tiling mode on/off
+
+*--tiling-grid-mode* <on|off|toggle>
+	Set grid snapping mode for tiling. When *on*, uses simple grid snapping
+	(original behavior). When *off*, uses smart resize preservation mode
+	(experimental) that preserves manually resized windows and arranges other
+	windows around them.
+
 # SESSION MANAGEMENT
 
 To enable the use of graphical clients launched via D-Bus or systemd service

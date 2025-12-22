@@ -793,8 +793,14 @@ view_minimize(struct view *view, bool minimized)
 	 * 'open file' dialog), so it saves trying to unmap them twice
 	 */
 	struct view *root = view_get_root(view);
+	bool was_minimized = root->minimized;
 	_minimize(root, minimized);
 	minimize_sub_views(root, minimized);
+
+	/* Rearrange tiled windows when minimize state changes */
+	if (view->server->tiling_mode && was_minimized != minimized) {
+		desktop_arrange_tiled(view->server);
+	}
 }
 
 bool
@@ -2601,6 +2607,12 @@ view_destroy(struct view *view)
 
 	/* Remove view from server->views */
 	wl_list_remove(&view->link);
+
+	/* Rearrange tiled windows when one is destroyed */
+	if (server->tiling_mode) {
+		desktop_arrange_tiled(server);
+	}
+
 	free(view);
 
 	cursor_update_focus(server);

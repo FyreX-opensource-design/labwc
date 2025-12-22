@@ -269,6 +269,69 @@ handle_sigusr1(int signal, void *data)
 		return 0;
 	}
 
+	/* Check for tiling command */
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-tiling-cmd", runtime_dir);
+
+	f = fopen(cmd_file, "r");
+	if (f) {
+		char line[288];
+		if (fgets(line, sizeof(line), f)) {
+			char command[32];
+			char arg[256];
+			if (sscanf(line, "%31s %255s", command, arg) == 2) {
+				if (!strcmp(command, "enable")) {
+					server->tiling_mode = true;
+					wlr_log(WLR_INFO, "Tiling mode enabled");
+					desktop_arrange_tiled(server);
+				} else if (!strcmp(command, "disable")) {
+					server->tiling_mode = false;
+					wlr_log(WLR_INFO, "Tiling mode disabled");
+				} else if (!strcmp(command, "toggle")) {
+					server->tiling_mode = !server->tiling_mode;
+					wlr_log(WLR_INFO, "Tiling mode %s",
+						server->tiling_mode ? "enabled" : "disabled");
+					if (server->tiling_mode) {
+						desktop_arrange_tiled(server);
+					}
+				} else if (!strcmp(command, "grid-mode")) {
+					if (!strcmp(arg, "on") || !strcmp(arg, "true") || !strcmp(arg, "1")) {
+						server->tiling_grid_mode = true;
+						wlr_log(WLR_INFO, "Tiling grid mode enabled (simple grid snapping)");
+					} else if (!strcmp(arg, "off") || !strcmp(arg, "false") || !strcmp(arg, "0")) {
+						server->tiling_grid_mode = false;
+						wlr_log(WLR_INFO, "Tiling grid mode disabled (smart resize preservation)");
+					} else if (!strcmp(arg, "toggle")) {
+						server->tiling_grid_mode = !server->tiling_grid_mode;
+						wlr_log(WLR_INFO, "Tiling grid mode %s",
+							server->tiling_grid_mode ? "enabled" : "disabled");
+					}
+					if (server->tiling_mode) {
+						desktop_arrange_tiled(server);
+					}
+				}
+			} else if (sscanf(line, "%31s", command) == 1) {
+				if (!strcmp(command, "enable")) {
+					server->tiling_mode = true;
+					wlr_log(WLR_INFO, "Tiling mode enabled");
+					desktop_arrange_tiled(server);
+				} else if (!strcmp(command, "disable")) {
+					server->tiling_mode = false;
+					wlr_log(WLR_INFO, "Tiling mode disabled");
+				} else if (!strcmp(command, "toggle")) {
+					server->tiling_mode = !server->tiling_mode;
+					wlr_log(WLR_INFO, "Tiling mode %s",
+						server->tiling_mode ? "enabled" : "disabled");
+					if (server->tiling_mode) {
+						desktop_arrange_tiled(server);
+					}
+				}
+			}
+		}
+		fclose(f);
+		unlink(cmd_file);
+		return 0;
+	}
+
 	return 0;
 }
 
@@ -571,6 +634,10 @@ void
 server_init(struct server *server)
 {
 	server->primary_client_pid = -1;
+	server->tiling_mode = false;
+	server->tiling_grid_mode = true; /* Default to grid mode (original behavior) */
+	server->resized_view = NULL;
+	memset(&server->resized_view_geometry, 0, sizeof(server->resized_view_geometry));
 	server->wl_display = wl_display_create();
 	if (!server->wl_display) {
 		wlr_log(WLR_ERROR, "cannot allocate a wayland display");

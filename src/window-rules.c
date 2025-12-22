@@ -110,6 +110,14 @@ window_rules_get_property(struct view *view, const char *property)
 					&& !strcasecmp(property, "iconPreferClient")) {
 				return rule->icon_prefer_client;
 			}
+			if (rule->tile
+					&& !strcasecmp(property, "tile")) {
+				return rule->tile;
+			}
+			if (rule->tile_direction
+					&& !strcasecmp(property, "tileDirection")) {
+				return rule->tile_direction;
+			}
 		}
 	}
 	return LAB_PROP_UNSPECIFIED;

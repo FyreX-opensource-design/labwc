@@ -1434,6 +1434,24 @@ situation.
 	This property allows prioritizing client supplied icons for specific
 	applications. Default is server.
 
+*<windowRules><windowRule tile="">* [yes|no|default]
+	Controls whether a window should be automatically tiled when tiling mode
+	is enabled. When *yes*, the window will be included in the tiled layout.
+	When *no*, the window will be excluded from tiling. When *default* or
+	unspecified, the window will be tiled if it meets the normal criteria
+	(non-minimized, non-fullscreen, etc.).
+
+*<windowRules><windowRule tileDirection="">* [vertical|horizontal|auto|default]
+	(Experimental) Controls the preferred tiling direction for a window when
+	smart resize preservation mode is enabled (see *--tiling-grid-mode* in
+	labwc(1)). When *vertical*, the layout algorithm will prefer vertical
+	splits for this window. When *horizontal*, it will prefer horizontal
+	splits. When *auto* or *default*, the layout algorithm will automatically
+	choose based on screen aspect ratio and available space.
+
+	NOTE: Smart resize preservation mode (grid-mode off) is experimental
+	and may behave unexpectedly in edge cases.
+
 ## MENU
 
 ```

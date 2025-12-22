@@ -867,6 +867,18 @@ handle_map(struct wl_listener *listener, void *data)
 
 	view_impl_map(view);
 	view->been_mapped = true;
+
+	/* Arrange windows in tiling mode after view is mapped */
+	if (view->server->tiling_mode && view_is_floating(view) &&
+	    !view->minimized && !view->fullscreen &&
+	    !view_is_always_on_top(view) && !view_is_always_on_bottom(view) &&
+	    window_rules_get_property(view, "fixedPosition") != LAB_PROP_TRUE) {
+		/* Check if this view should be tiled */
+		enum property tile_prop = window_rules_get_property(view, "tile");
+		if (tile_prop != LAB_PROP_FALSE) {
+			desktop_arrange_tiled(view->server);
+		}
+	}
 }
 
 static void
@@ -876,6 +888,10 @@ handle_unmap(struct wl_listener *listener, void *data)
 	if (view->mapped) {
 		view->mapped = false;
 		view_impl_unmap(view);
+		/* Rearrange tiled windows when one is unmapped */
+		if (view->server->tiling_mode) {
+			desktop_arrange_tiled(view->server);
+		}
 	}
 }
 

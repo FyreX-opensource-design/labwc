@@ -40,6 +40,8 @@ struct window_rule {
 	enum property ignore_configure_request;
 	enum property fixed_position;
 	enum property icon_prefer_client;
+	enum property tile; /* Controls tiling behavior: TRUE=always tile, FALSE=never tile, UNSET=default */
+	enum property tile_direction; /* Controls tiling direction: TRUE=vertical, FALSE=horizontal, UNSET=auto */
 
 	struct wl_list link; /* struct rcxml.window_rules */
 };

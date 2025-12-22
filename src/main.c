@@ -40,6 +40,10 @@ static const struct option long_options[] = {
 	{"workspace-next", no_argument, NULL, 2001},
 	{"workspace-prev", no_argument, NULL, 2002},
 	{"workspace-current", no_argument, NULL, 2003},
+	{"enable-tiling", no_argument, NULL, 3000},
+	{"disable-tiling", no_argument, NULL, 3001},
+	{"toggle-tiling", no_argument, NULL, 3002},
+	{"tiling-grid-mode", required_argument, NULL, 3003},
 	{0, 0, 0, 0}
 };
 
@@ -62,7 +66,11 @@ static const char labwc_usage[] =
 "      --workspace-switch <number|name>  Switch to a workspace by number or name\n"
 "      --workspace-next          Switch to next workspace\n"
 "      --workspace-prev          Switch to previous workspace\n"
-"      --workspace-current       Query the active workspace\n";
+"      --workspace-current       Query the active workspace\n"
+"      --enable-tiling           Enable automatic tiling mode\n"
+"      --disable-tiling          Disable automatic tiling mode\n"
+"      --toggle-tiling           Toggle automatic tiling mode on/off\n"
+"      --tiling-grid-mode <on|off|toggle>  Set grid snapping mode (on=simple grid, off=smart resize preservation)\n";
 
 static void
 usage(void)
@@ -164,6 +172,41 @@ send_keybind_command(const char *command, const char *id)
 	}
 
 	fprintf(f, "%s %s\n", command, id);
+	fclose(f);
+
+	/* Trigger the running instance to process the command */
+	send_signal_to_labwc_pid(SIGUSR1);
+}
+
+static void
+send_tiling_command(const char *command, const char *arg)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *labwc_pid = getenv("LABWC_PID");
+	if (!labwc_pid) {
+		fprintf(stderr, "LABWC_PID not set - labwc is not running\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char cmd_file[256];
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-tiling-cmd", runtime_dir);
+
+	FILE *f = fopen(cmd_file, "w");
+	if (!f) {
+		perror("Failed to open command file");
+		exit(EXIT_FAILURE);
+	}
+
+	if (arg) {
+		fprintf(f, "%s %s\n", command, arg);
+	} else {
+		fprintf(f, "%s\n", command);
+	}
 	fclose(f);
 
 	/* Trigger the running instance to process the command */
@@ -336,6 +379,18 @@ main(int argc, char *argv[])
 		case 2003: /* --workspace-current */
 			query_workspace_current();
 			break;
+		case 3000: /* --enable-tiling */
+			send_tiling_command("enable", NULL);
+			exit(0);
+		case 3001: /* --disable-tiling */
+			send_tiling_command("disable", NULL);
+			exit(0);
+		case 3002: /* --toggle-tiling */
+			send_tiling_command("toggle", NULL);
+			exit(0);
+		case 3003: /* --tiling-grid-mode */
+			send_tiling_command("grid-mode", optarg);
+			exit(0);
 		case 'h':
 		default:
 			usage();

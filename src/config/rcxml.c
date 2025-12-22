@@ -248,6 +248,8 @@ fill_window_rule(xmlNode *node)
 {
 	struct window_rule *window_rule = znew(*window_rule);
 	window_rule->window_type = LAB_WINDOW_TYPE_INVALID;
+	window_rule->tile = LAB_PROP_UNSPECIFIED;
+	window_rule->tile_direction = LAB_PROP_UNSPECIFIED;
 	wl_list_append(&rc.window_rules, &window_rule->link);
 	wl_list_init(&window_rule->actions);
 
@@ -300,6 +302,20 @@ fill_window_rule(xmlNode *node)
 			set_property(content, &window_rule->ignore_configure_request);
 		} else if (!strcasecmp(key, "fixedPosition")) {
 			set_property(content, &window_rule->fixed_position);
+		} else if (!strcasecmp(key, "tile")) {
+			set_property(content, &window_rule->tile);
+		} else if (!strcasecmp(key, "tileDirection")) {
+			if (!strcasecmp(content, "vertical")) {
+				window_rule->tile_direction = LAB_PROP_TRUE;
+			} else if (!strcasecmp(content, "horizontal")) {
+				window_rule->tile_direction = LAB_PROP_FALSE;
+			} else if (!strcasecmp(content, "auto") || !strcasecmp(content, "default")) {
+				window_rule->tile_direction = LAB_PROP_UNSET;
+			} else {
+				wlr_log(WLR_ERROR,
+					"Invalid value for window rule property 'tileDirection': %s (expected: vertical, horizontal, or auto)",
+					content);
+			}
 		}
 	}
 

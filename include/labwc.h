@@ -321,6 +321,15 @@ struct server {
 	struct sfdo *sfdo;
 
 	pid_t primary_client_pid;
+
+	/* Tiling mode: when enabled, windows are automatically arranged in a tiled layout */
+	bool tiling_mode;
+	/* Tiling grid mode: when true, use simple grid snapping (no resize preservation);
+	 * when false, use smart mode that preserves manual resizes */
+	bool tiling_grid_mode;
+	/* Track manually resized window to preserve its size during rearrangement */
+	struct view *resized_view;
+	struct wlr_box resized_view_geometry;
 };
 
 void xdg_popup_create(struct view *view, struct wlr_xdg_popup *wlr_popup);
@@ -361,6 +370,7 @@ void desktop_focus_view_or_surface(struct seat *seat, struct view *view,
 	struct wlr_surface *surface, bool raise);
 
 void desktop_arrange_all_views(struct server *server);
+void desktop_arrange_tiled(struct server *server);
 void desktop_focus_output(struct output *output);
 
 /**
