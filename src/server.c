@@ -182,6 +182,32 @@ update_workspace_status_file(struct server *server)
 }
 
 static void
+update_tiling_status_file(struct server *server)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		return;
+	}
+
+	char status_file[256];
+	snprintf(status_file, sizeof(status_file), "%s/labwc-tiling-status", runtime_dir);
+
+	FILE *f = fopen(status_file, "w");
+	if (!f) {
+		return;
+	}
+
+	if (!server->tiling_mode) {
+		fprintf(f, "stacking\n");
+	} else if (server->tiling_grid_mode) {
+		fprintf(f, "grid\n");
+	} else {
+		fprintf(f, "smart\n");
+	}
+	fclose(f);
+}
+
+static void
 process_workspace_command(struct server *server, const char *command, const char *arg)
 {
 	struct workspace *target = NULL;
@@ -287,12 +313,14 @@ handle_sigusr1(int signal, void *data)
 					wlr_log(WLR_INFO, "Tiling mode enabled");
 					desktop_arrange_tiled(server);
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "disable")) {
 					server->tiling_mode = false;
 					/* Clear resized view tracking when disabling tiling */
 					server->resized_view = NULL;
 					wlr_log(WLR_INFO, "Tiling mode disabled");
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "toggle")) {
 					server->tiling_mode = !server->tiling_mode;
 					/* Clear resized view tracking when disabling tiling */
@@ -305,6 +333,7 @@ handle_sigusr1(int signal, void *data)
 						desktop_arrange_tiled(server);
 					}
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "grid-mode")) {
 					if (!strcmp(arg, "on") || !strcmp(arg, "true") || !strcmp(arg, "1")) {
 						server->tiling_grid_mode = true;
@@ -327,6 +356,7 @@ handle_sigusr1(int signal, void *data)
 						desktop_arrange_tiled(server);
 					}
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "recalculate")) {
 					if (server->tiling_mode) {
 						wlr_log(WLR_INFO, "Recalculating tiling layout");
@@ -334,6 +364,9 @@ handle_sigusr1(int signal, void *data)
 					} else {
 						wlr_log(WLR_INFO, "Tiling mode is disabled, cannot recalculate");
 					}
+				} else if (!strcmp(command, "status")) {
+					update_tiling_status_file(server);
+					wlr_log(WLR_INFO, "Tiling status updated");
 				}
 			} else if (sscanf(line, "%31s", command) == 1) {
 				if (!strcmp(command, "enable")) {
@@ -341,12 +374,14 @@ handle_sigusr1(int signal, void *data)
 					wlr_log(WLR_INFO, "Tiling mode enabled");
 					desktop_arrange_tiled(server);
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "disable")) {
 					server->tiling_mode = false;
 					/* Clear resized view tracking when disabling tiling */
 					server->resized_view = NULL;
 					wlr_log(WLR_INFO, "Tiling mode disabled");
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "toggle")) {
 					server->tiling_mode = !server->tiling_mode;
 					wlr_log(WLR_INFO, "Tiling mode %s",
@@ -355,6 +390,7 @@ handle_sigusr1(int signal, void *data)
 						desktop_arrange_tiled(server);
 					}
 					tiling_timer_update(server);
+					update_tiling_status_file(server);
 				} else if (!strcmp(command, "recalculate")) {
 					if (server->tiling_mode) {
 						wlr_log(WLR_INFO, "Recalculating tiling layout");
@@ -362,6 +398,9 @@ handle_sigusr1(int signal, void *data)
 					} else {
 						wlr_log(WLR_INFO, "Tiling mode is disabled, cannot recalculate");
 					}
+				} else if (!strcmp(command, "status")) {
+					update_tiling_status_file(server);
+					wlr_log(WLR_INFO, "Tiling status updated");
 				}
 			}
 		}
@@ -720,6 +759,8 @@ server_init(struct server *server)
 	server->resized_view = NULL;
 	server->tiling_recalculate_timer = NULL;
 	memset(&server->resized_view_geometry, 0, sizeof(server->resized_view_geometry));
+	/* Initialize tiling status file */
+	update_tiling_status_file(server);
 	server->wl_display = wl_display_create();
 	if (!server->wl_display) {
 		wlr_log(WLR_ERROR, "cannot allocate a wayland display");

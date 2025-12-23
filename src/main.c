@@ -45,6 +45,7 @@ static const struct option long_options[] = {
 	{"toggle-tiling", no_argument, NULL, 3002},
 	{"tiling-grid-mode", required_argument, NULL, 3003},
 	{"recalculate-tiling", no_argument, NULL, 3004},
+	{"tiling-status", no_argument, NULL, 3005},
 	{0, 0, 0, 0}
 };
 
@@ -72,7 +73,8 @@ static const char labwc_usage[] =
 "      --disable-tiling          Disable automatic tiling mode\n"
 "      --toggle-tiling           Toggle automatic tiling mode on/off\n"
 "      --tiling-grid-mode <on|off|toggle>  Set grid snapping mode (on=simple grid, off=smart resize preservation)\n"
-"      --recalculate-tiling      Recalculate and rearrange tiled windows\n";
+"      --recalculate-tiling      Recalculate and rearrange tiled windows\n"
+"      --tiling-status           Query the current tiling mode (stacking/grid/smart)\n";
 
 static void
 usage(void)
@@ -286,6 +288,42 @@ query_workspace_current(void)
 	exit(0);
 }
 
+static void
+query_tiling_status(void)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char status_file[256];
+	snprintf(status_file, sizeof(status_file), "%s/labwc-tiling-status", runtime_dir);
+
+	FILE *f = fopen(status_file, "r");
+	if (!f) {
+		fprintf(stderr, "Failed to read tiling status file\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char status[256];
+	if (fgets(status, sizeof(status), f)) {
+		/* Remove trailing newline if present */
+		size_t len = strlen(status);
+		if (len > 0 && status[len - 1] == '\n') {
+			status[len - 1] = '\0';
+		}
+		printf("%s\n", status);
+	} else {
+		fprintf(stderr, "Failed to read tiling status\n");
+		fclose(f);
+		exit(EXIT_FAILURE);
+	}
+
+	fclose(f);
+	exit(0);
+}
+
 struct idle_ctx {
 	struct server *server;
 	const char *primary_client;
@@ -396,6 +434,9 @@ main(int argc, char *argv[])
 		case 3004: /* --recalculate-tiling */
 			send_tiling_command("recalculate", NULL);
 			exit(0);
+		case 3005: /* --tiling-status */
+			query_tiling_status();
+			break;
 		case 'h':
 		default:
 			usage();
