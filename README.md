@@ -1,16 +1,10 @@
 # labFyre
 
-<h3 align="center">[<a
-href="https://labwc.github.io/">Website</a>] [<a
-href="https://github.com/labwc/labwc-scope#readme">Scope</a>] [<a
-href="https://web.libera.chat/gamja/?channels=#labwc">IRC&nbsp;Channel</a>] [<a
-href="NEWS.md">Release&nbsp;Notes</a>]</h3>
-
 - [1. Project Description](#1-project-description)
   - [1.1 What Is This?](#11-what-is-this)
   - [1.2 Why](#12-why)
   - [1.3 Why The Openbox Theme Specification?](#13-why-the-openbox-theme-specification)
-  - [1.4 High Modularity](#14-high moduarity)
+  - [1.4 High Modularity](#14-high-modularity)
   - [1.5 Screenshot](#16-screenshot)
 - [2. Build and Installation](#2-build-and-installation)
 - [3. Configuration](#3-configuration)
