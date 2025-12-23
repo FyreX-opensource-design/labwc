@@ -25,8 +25,8 @@ following:
 - inspired by BunsenLabs and ArchLabs
 - your favorite pet
 
-LabFyre and do all of this and more, it's a soft fork of labwc with support for
-shell script control
+LabFyre can do all of this and more, it's a soft fork of labwc with support for
+shell script control, among a host of other features.
 
 LabwFyre is a [wlroots]-based window-stacking and tiling compositor for [Wayland], built from [labwc] 
 and has support for [Openbox] themes.
