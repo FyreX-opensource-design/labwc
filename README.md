@@ -1,4 +1,4 @@
-# labwc
+# labFyre
 
 <h3 align="center">[<a
 href="https://labwc.github.io/">Website</a>] [<a
@@ -10,14 +10,12 @@ href="NEWS.md">Release&nbsp;Notes</a>]</h3>
   - [1.1 What Is This?](#11-what-is-this)
   - [1.2 Why](#12-why)
   - [1.3 Why The Openbox Theme Specification?](#13-why-the-openbox-theme-specification)
-  - [1.4 Very High Level Scope](#14-very-high-level-scope)
-  - [1.5 Videos](#15-videos)
-  - [1.6 Screenshot](#16-screenshot)
+  - [1.4 High Modularity](#14-high moduarity)
+  - [1.5 Screenshot](#16-screenshot)
 - [2. Build and Installation](#2-build-and-installation)
 - [3. Configuration](#3-configuration)
 - [4. Theming](#4-theming)
 - [5. Usage](#5-usage)
-  - [5.1 Gaming](#51-gaming)
 - [6. Integration](#6-integration)
 - [7. Translations](#7-translations)
 
@@ -25,7 +23,7 @@ href="NEWS.md">Release&nbsp;Notes</a>]</h3>
 
 ### 1.1 What Is This?
 
-Labwc stands for Lab Wayland Compositor, where lab can mean any of the
+Quoted from upstream: Labwc stands for Lab Wayland Compositor, where lab can mean any of the
 following:
 
 - lightweight and *box-inspired
@@ -33,95 +31,59 @@ following:
 - inspired by BunsenLabs and ArchLabs
 - your favorite pet
 
-Labwc is a [wlroots]-based window-stacking compositor for [Wayland], inspired
-by [Openbox].
+LabFyre and do all of this and more, it's a soft fork of labwc with support for
+shell script control
 
-It is light-weight and independent with a focus on simply stacking windows well
-and rendering some window decorations. It takes a no-bling/frills approach and
-says no to features such as animations.  It relies on clients for panels,
-screenshots, wallpapers and so on to create a full desktop environment.
+LabwFyre is a [wlroots]-based window-stacking and tiling compositor for [Wayland], built from [labwc] 
+and has support for [Openbox] themes.
 
-Labwc tries to stay in keeping with [wlroots] and [sway] in terms of general
-approach and coding style.
+It is light-weight and independent with a focus that can range from simply stacking windows well
+to a tiling layout and keybinds for each device and application.
+It still holds support for a no-bling/frills approach, yet animations are still in the works.
+It relies on clients for panels, screenshots, wallpapers and so on to create a full desktop environment.
 
-Labwc has no reliance on any particular Desktop Environment, Desktop Shell or
+LabFyre has no reliance on any particular Desktop Environment, Desktop Shell or
 session. Nor does it depend on any UI toolkits such as Qt or GTK.
 
 ### 1.2 Why?
 
-Firstly, we believe that there is a need for a simple Wayland window-stacking
+Firstly, upsteam devs believed that there is a need for a simple Wayland window-stacking
 compositor which strikes a balance between minimalism and bloat approximately
 at the level where Window Managers like Openbox reside in the X11 domain.  Most
-of the core developers are accustomed to low resource Desktop Environments such
+of the core developers were accustomed to low resource Desktop Environments such
 as Mate/XFCE or standalone Window Managers such as Openbox under X11.  Labwc
-aims to make a similar setup possible under Wayland, with small and independent
+aimed to make a similar setup possible under Wayland, with small and independent
 components rather than a large, integrated software eco-system.
 
-Secondly, the Wayland community has achieved an amazing amount so far, and we
+Secondly, the Wayland community has achieved an amazing amount so far, and the upstream devs
 want to help solve the unsolved problems to make Wayland viable for more
-people. We think that standardisation and de-fragmentation is a route to
-greater Wayland adoption, and wanting to play our part in this, Labwc only
-understands [wayland-protocols] &amp; [wlr-protocols], and it cannot be
+people. Labwc only understood [wayland-protocols] &amp; [wlr-protocols], and it could not be
 controlled with dbus, sway/i3/custom-IPC or other technology.
 
-Thirdly, it is important to us that scope is tightly controlled so that the
-compositor matures to production quality. On the whole, we value robustness,
-reliability, stability and simplicity over new features. Coming up with new
-ideas and features is easy - maintaining and stabilising them is not.
-
-Fourthly, we are of the view that a compositor should be boring in order to do
-its job well. In this regard we follow in the footsteps of [metacity] which
-describes itself as a "Boring window manager for the adult in you. Many window
-managers are like Marshmallow Froot Loops; Metacity is like Cheerios."
-
-Finally, we think that an elegant solution to all of this does not need to feel
-square and pixelated like something out of the 1990s, but should look
-contemporary and enable cutting-edge performance.
+This was quite limiting for some scripts we wanted to make, specifically sticky keys 
+and universial copy/paste, as well as the fact that some other features were limited
+such as virtual outputs being purely tied to actions within rc.xml.
+We extend this to be triggerable via shell commands, so it makes scripting a lot easier.
 
 ### 1.3 Why The Openbox Theme Specification?
 
-In order to avoid reinventing configuration and theme syntaxes, the [Openbox]
-3.6 specification is used. This does not mean that Labwc is an Openbox clone
-but rather that configuration files will look and feel familiar.
+This is from the upstream Labwc, and a lot of themes have support for it
+GTK and QT themes can still be used to some extent, but should be Server side over
+client.
 
-Also, parsing GTK3+ and Qt themes for window decorations is very complicated,
-so using much simpler specs such as those used by Openbox and xfwm makes sense
-for a compositor such as Labwc, both in terms of implementation and for user
-modification.
+### 1.4 high modularity
 
-Openbox spec is somewhat of a stable standard considering how long it has
-remained unchanged for and how wide-spread its adoption is by lightweight
-distributions such as LXDE, LXQt, BunsenLabs, ArchLabs, Mabox and Raspbian. Some
-widely used themes (for example Numix and Arc) have built-in support.
+All the triggers and extensions are triggerable via flags sent to the binary.
+This allows you to use any language to make plugins.
 
-We could have invented a whole new syntax, but that's not where we want to
-spend our effort.
-
-### 1.4 Very High Level Scope
-
-A lot of emphasis is put on code simplicity when considering features.
+Bash, Zsh, Xonsh, python, go, java, zig... so long as it can trigger system commands
+you can write a plugin for it.
 
 See [scope] for full details on implemented features.
 
-### 1.5 Videos
+### 1.5 Screenshot
 
-| video link                | date        | duration
-| ------------------------- | ------------| -------
-| [0.8.3-release-video]     | 03-Mar-2025 | 2:35
-| [0.7.2-release-video]     | 24-May-2024 | 3:17
-| [0.6.0-release-video]     | 31-Oct-2022 | 2:48
-| [0.3.0-release-video]     | 05-Aug-2021 | 1:10
-| [pre-0.1.0-release-video] | 25-Feb-2021 | 3:42
-
-[0.8.3-release-video]: https://youtu.be/HGzqci_THwA
-[0.7.2-release-video]: https://youtu.be/gNIj6VU-IH8
-[0.6.0-release-video]: https://youtu.be/guBnx18EQiA
-[0.3.0-release-video]: https://youtu.be/AU_M3n_FS-E
-[pre-0.1.0-release-video]: https://youtu.be/rE1bQjSVJzg
-
-### 1.6 Screenshot
-
-The obligatory screenshot:
+The obligatory screenshot (origionally from mainline:
 
 <a href="https://labwc.github.io/img/scrot1.png">
   <img src="https://labwc.github.io/img/scrot1-small.png">
@@ -173,8 +135,9 @@ prevent installing the wlroots headers:
 ## 3. Configuration
 
 User config files are located at `${XDG_CONFIG_HOME:-$HOME/.config/labwc/}`
-with the following six files being used: [rc.xml], [menu.xml], [autostart], [shutdown],
-[environment] and [themerc-override].
+and system configs can be stored at `/etc/xdg/labwc/`
+with the following seven files being used: [rc.xml], [menu.xml], [autostart], [reconfigure],
+[shutdown], [environment] and [themerc-override].
 
 Run `labwc --reconfigure` to reload configuration and theme.
 
@@ -208,7 +171,7 @@ If you have not created an rc.xml config file, default bindings will be:
 | ------------------------ | ------
 | `alt`-`tab`              | activate next window
 | `alt`-`shift`-`tab`      | activate previous window
-| `super`-`return`         | lab-sensible-terminal
+| `super`-`return/enter`         | lab-sensible-terminal
 | `alt`-`F4`               | close window
 | `super`-`a`              | toggle maximize
 | `super`-`mouse-left`     | move window
@@ -223,25 +186,20 @@ If you have not created an rc.xml config file, default bindings will be:
 
 A root-menu can be opened by clicking on the desktop.
 
-### 5.1 Gaming
-
-Cursor confinement is supported from version `0.6.2`. If using older versions,
-use a nested [gamescope] instance for gaming.  It can be added to steam via
-game launch option: `gamescope -f -- %command%`.
-
 ## 6. Integration
 
 Suggested apps to use with Labwc:
 
-- Screen shooter: [grim]
+- Screen shooter: [grim] [slurp]
 - Screen recorder: [wf-recorder]
-- Background image: [swaybg]
+- Background image: [swaybg] [swww]
 - Panel: [waybar], [lavalauncher], [sfwbar], [xfce4-panel]
 - Launchers: [bemenu], [fuzzel], [wofi]
-- Output managers: [wlopm], [kanshi], [wlr-randr]
-- Screen locker: [swaylock]
+- Output managers: [wlopm], [kanshi], [shikane], [wlr-randr]
+- Screen locker: [swaylock], [gtklock]
 - Gamma adjustment: [gammastep]
-- Idle screen inhibitor: [sway-audio-idle-inhibit]
+- Idle screen inhibitor: [swayidle], [sway-audio-idle-inhibit]
+- Compositor Control: [wlrctl]
 
 See [integration] for further details.
 
