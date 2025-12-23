@@ -8,6 +8,8 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include "common/list.h"
+#include "common/mem.h"
 #include "common/scene-helpers.h"
 #include "config/rcxml.h"
 #include "dnd.h"
@@ -570,7 +572,10 @@ desktop_arrange_tiled(struct server *server)
 		/* Check if there's a manually resized window we should preserve */
 		/* Skip resize preservation if grid mode is enabled (simple grid snapping) */
 		struct view *resized_view = NULL;
-		if (!server->tiling_grid_mode && server->resized_view && server->resized_view->output == output) {
+		if (!server->tiling_grid_mode && server->resized_view &&
+		    server->resized_view->output == output &&
+		    server->resized_view->workspace == server->workspaces.current &&
+		    !server->resized_view->minimized) {
 			resized_view = server->resized_view;
 			/* Adjust output_count to exclude the resized window */
 			output_count--;
@@ -655,9 +660,18 @@ desktop_arrange_tiled(struct server *server)
 			cell_height = 0;
 		}
 
-		/* If there's a resized window, calculate remaining space for other windows */
+		/* If there's a resized window, identify adjacent windows and only adjust those */
 		struct wlr_box remaining_space = usable;
 		struct wlr_box *layout_area = &usable;
+		struct wl_list adjacent_views;
+		wl_list_init(&adjacent_views);
+		
+		/* Helper structure for adjacent views list */
+		struct adjacent_view_entry {
+			struct view *view;
+			struct wl_list link;
+		};
+		
 		if (resized_view) {
 			struct border resized_margin = ssd_thickness(resized_view);
 			/* Get the actual geometry with margins, relative to usable area */
@@ -668,219 +682,222 @@ desktop_arrange_tiled(struct server *server)
 				.height = server->resized_view_geometry.height + resized_margin.top + resized_margin.bottom,
 			};
 
-			/* Calculate the boundaries of the resized window's occupied space including gaps */
-			int resized_left = resized_full.x - rc.gap;
-			int resized_right = resized_full.x + resized_full.width + rc.gap;
-			int resized_top = resized_full.y - rc.gap;
-			int resized_bottom = resized_full.y + resized_full.height + rc.gap;
+			/* Ensure the resized window's geometry is within usable area bounds */
+			if (resized_full.x < usable.x) {
+				resized_full.width -= (usable.x - resized_full.x);
+				resized_full.x = usable.x;
+			}
+			if (resized_full.y < usable.y) {
+				resized_full.height -= (usable.y - resized_full.y);
+				resized_full.y = usable.y;
+			}
+			if (resized_full.x + resized_full.width > usable.x + usable.width) {
+				resized_full.width = usable.x + usable.width - resized_full.x;
+			}
+			if (resized_full.y + resized_full.height > usable.y + usable.height) {
+				resized_full.height = usable.y + usable.height - resized_full.y;
+			}
 
-			/* For 2 remaining windows, check where they are relative to resized window */
-			if (output_count == 2) {
-				/* Check positions of other windows to determine layout */
-				struct view *other1 = NULL, *other2 = NULL;
-				struct view *view_iter;
-				for_each_view(view_iter, &server->views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
-					if (view_iter->minimized || view_iter->fullscreen ||
-					    view_is_always_on_top(view_iter) || view_is_always_on_bottom(view_iter)) {
-						continue;
-					}
-					if (window_rules_get_property(view_iter, "fixedPosition") == LAB_PROP_TRUE) {
-						continue;
-					}
-					enum property tile_prop = window_rules_get_property(view_iter, "tile");
-					if (tile_prop == LAB_PROP_FALSE) {
-						continue;
-					}
-					if (view_iter->output != output || view_iter == resized_view) {
-						continue;
-					}
-					if (!other1) {
-						other1 = view_iter;
-					} else if (!other2) {
-						other2 = view_iter;
-						break;
-					}
+			/* Calculate the boundaries of the resized window's occupied space */
+			int resized_left = resized_full.x;
+			int resized_right = resized_full.x + resized_full.width;
+			int resized_top = resized_full.y;
+			int resized_bottom = resized_full.y + resized_full.height;
+
+			/* Find windows that are adjacent to the resized window */
+			/* A window is adjacent if it shares an edge or overlaps with the resized window's area */
+			for_each_view(view, &server->views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+				if (view == resized_view || view->minimized || view->fullscreen ||
+				    view_is_always_on_top(view) || view_is_always_on_bottom(view)) {
+					continue;
+				}
+				if (window_rules_get_property(view, "fixedPosition") == LAB_PROP_TRUE) {
+					continue;
+				}
+				enum property tile_prop = window_rules_get_property(view, "tile");
+				if (tile_prop == LAB_PROP_FALSE) {
+					continue;
+				}
+				if (view->output != output) {
+					continue;
 				}
 
-				/* Determine layout based on other windows' positions */
-				bool windows_below = false, windows_above = false;
-				bool windows_left = false, windows_right = false;
-				bool windows_overlap_horizontally = false;
+				struct border view_margin = ssd_thickness(view);
+				struct wlr_box view_full = (struct wlr_box){
+					.x = view->current.x - view_margin.left,
+					.y = view->current.y - view_margin.top,
+					.width = view->current.width + view_margin.left + view_margin.right,
+					.height = view->current.height + view_margin.top + view_margin.bottom,
+				};
 
-				if (other1) {
-					struct border m1 = ssd_thickness(other1);
-					struct wlr_box o1 = (struct wlr_box){
-						.x = other1->current.x - m1.left,
-						.y = other1->current.y - m1.top,
-						.width = other1->current.width + m1.left + m1.right,
-						.height = other1->current.height + m1.top + m1.bottom,
-					};
-					/* Check if windows overlap horizontally (within 50 pixels to account for gaps) */
-					if ((o1.x < resized_right + 50) && (o1.x + o1.width > resized_left - 50)) {
-						windows_overlap_horizontally = true;
-						if (o1.y > resized_bottom - 50) {
-							windows_below = true;
-						} else if (o1.y + o1.height < resized_top + 50) {
-							windows_above = true;
-						}
-					}
-					if (o1.x + o1.width < resized_left) {
-						windows_left = true;
-					} else if (o1.x > resized_right) {
-						windows_right = true;
-					}
+				/* Check if windows share an edge or overlap */
+				/* Adjacent if they share a horizontal or vertical edge (within gap tolerance) */
+				bool shares_horizontal_edge = false;
+				bool shares_vertical_edge = false;
+				
+				/* Check for horizontal edge sharing (top/bottom alignment) */
+				if ((abs(view_full.y - resized_bottom) <= rc.gap + 5) ||
+				    (abs((view_full.y + view_full.height) - resized_top) <= rc.gap + 5) ||
+				    (view_full.y < resized_bottom && (view_full.y + view_full.height) > resized_top)) {
+					shares_horizontal_edge = true;
 				}
-				if (other2) {
-					struct border m2 = ssd_thickness(other2);
-					struct wlr_box o2 = (struct wlr_box){
-						.x = other2->current.x - m2.left,
-						.y = other2->current.y - m2.top,
-						.width = other2->current.width + m2.left + m2.right,
-						.height = other2->current.height + m2.top + m2.bottom,
-					};
-					if ((o2.x < resized_right + 50) && (o2.x + o2.width > resized_left - 50)) {
-						windows_overlap_horizontally = true;
-						if (o2.y > resized_bottom - 50) {
-							windows_below = true;
-						} else if (o2.y + o2.height < resized_top + 50) {
-							windows_above = true;
-						}
-					}
-					if (o2.x + o2.width < resized_left) {
-						windows_left = true;
-					} else if (o2.x > resized_right) {
-						windows_right = true;
-					}
+				
+				/* Check for vertical edge sharing (left/right alignment) */
+				if ((abs(view_full.x - resized_right) <= rc.gap + 5) ||
+				    (abs((view_full.x + view_full.width) - resized_left) <= rc.gap + 5) ||
+				    (view_full.x < resized_right && (view_full.x + view_full.width) > resized_left)) {
+					shares_vertical_edge = true;
 				}
 
-				/* Use window positions to determine layout */
-				if (windows_overlap_horizontally && windows_below) {
-					/* Windows are stacked vertically - resized window grew downward */
-					/* Use space below resized window, stack remaining windows vertically */
-					remaining_space.x = resized_full.x;
-					remaining_space.width = resized_full.width;
-					remaining_space.y = resized_bottom;
-					remaining_space.height = usable.y + usable.height - resized_bottom;
+				/* Window is adjacent if it shares at least one edge */
+				if (shares_horizontal_edge || shares_vertical_edge) {
+					/* Add to adjacent list for later processing */
+					struct adjacent_view_entry *entry = znew(*entry);
+					entry->view = view;
+					wl_list_append(&adjacent_views, &entry->link);
+				}
+			}
+
+			/* Count adjacent windows */
+			int adjacent_count = 0;
+			struct adjacent_view_entry *entry;
+			wl_list_for_each(entry, &adjacent_views, link) {
+				adjacent_count++;
+			}
+
+			/* If we found adjacent windows, only adjust those */
+			if (adjacent_count > 0) {
+				/* Recalculate layout for adjacent windows only */
+				output_count = adjacent_count;
+				if (output_count == 1) {
 					cols = 1;
+					rows = 1;
+				} else if (output_count == 2) {
+					cols = 2;
+					rows = 1;
+				} else if (output_count == 3) {
+					cols = 2;
 					rows = 2;
-				} else if (windows_overlap_horizontally && windows_above) {
-					/* Windows are stacked vertically - resized window grew upward */
-					/* Use space above resized window, stack remaining windows vertically */
-					remaining_space.x = resized_full.x;
-					remaining_space.width = resized_full.width;
-					remaining_space.y = usable.y;
-					remaining_space.height = resized_top - usable.y;
-					cols = 1;
-					rows = 2;
-				} else if (windows_left && !windows_right) {
-					/* Resized window on right - use left side, stack vertically */
-					remaining_space.x = usable.x;
-					remaining_space.width = resized_left - usable.x;
-					remaining_space.y = usable.y;
-					remaining_space.height = usable.height;
-					cols = 1;
-					rows = 2;
-				} else if (windows_right && !windows_left) {
-					/* Resized window on left - use right side, stack vertically */
-					remaining_space.x = resized_right;
-					remaining_space.width = usable.x + usable.width - resized_right;
-					remaining_space.y = usable.y;
-					remaining_space.height = usable.height;
-					cols = 1;
+				} else if (output_count == 4) {
+					cols = 2;
 					rows = 2;
 				} else {
-					/* Fallback: use screen position and largest area */
-					int screen_center_x = usable.x + usable.width / 2;
-					bool clearly_on_left = resized_right < screen_center_x;
-					bool clearly_on_right = resized_left > screen_center_x;
-					
-					int left_area = (resized_left - usable.x) * usable.height;
-					int right_area = (usable.x + usable.width - resized_right) * usable.height;
-					int top_area = (resized_top - usable.y) * usable.width;
-					int bottom_area = (usable.y + usable.height - resized_bottom) * usable.width;
-					
-					if (clearly_on_left && left_area < right_area) {
-						/* Use right area - stack vertically */
-						remaining_space.x = resized_right;
-						remaining_space.width = usable.x + usable.width - resized_right;
-						remaining_space.y = usable.y;
-						remaining_space.height = usable.height;
-						cols = 1;
-						rows = 2;
-					} else if (clearly_on_right && right_area < left_area) {
-						/* Use left area - stack vertically */
-						remaining_space.x = usable.x;
-						remaining_space.width = resized_left - usable.x;
-						remaining_space.y = usable.y;
-						remaining_space.height = usable.height;
-						cols = 1;
-						rows = 2;
-					} else if (top_area >= bottom_area && top_area > left_area && top_area > right_area) {
-						/* Use top area - side by side */
-						remaining_space.x = usable.x;
-						remaining_space.width = usable.width;
-						remaining_space.y = usable.y;
-						remaining_space.height = resized_top - usable.y;
-						cols = 2;
-						rows = 1;
-					} else if (bottom_area > left_area && bottom_area > right_area) {
-						/* Use bottom area - side by side */
-						remaining_space.x = usable.x;
-						remaining_space.width = usable.width;
-						remaining_space.y = resized_bottom;
-						remaining_space.height = usable.y + usable.height - resized_bottom;
-						cols = 2;
-						rows = 1;
-					} else if (left_area >= right_area) {
-						/* Use left area - stack vertically */
-						remaining_space.x = usable.x;
-						remaining_space.width = resized_left - usable.x;
-						remaining_space.y = usable.y;
-						remaining_space.height = usable.height;
-						cols = 1;
-						rows = 2;
-					} else {
-						/* Use right area - stack vertically */
-						remaining_space.x = resized_right;
-						remaining_space.width = usable.x + usable.width - resized_right;
-						remaining_space.y = usable.y;
-						remaining_space.height = usable.height;
-						cols = 1;
-						rows = 2;
-					}
+					cols = 3;
+					rows = (output_count + 2) / 3;
 				}
-				/* Recalculate last_row_count for new layout */
+
 				last_row_count = output_count % cols;
 				if (last_row_count == 0) {
 					last_row_count = cols;
 				}
-			} else {
-				/* More than 2 remaining windows - use simple left/right or top/bottom split */
-				if (resized_left <= usable.x + usable.width / 2) {
-					/* Resized window on left - use right side for others */
-					remaining_space.x = resized_right;
-					remaining_space.width = usable.x + usable.width - resized_right;
-					remaining_space.y = usable.y;
-					remaining_space.height = usable.height;
-				} else {
-					/* Resized window on right - use left side for others */
-					remaining_space.x = usable.x;
-					remaining_space.width = resized_left - usable.x;
-					remaining_space.y = usable.y;
-					remaining_space.height = usable.height;
-				}
-			}
 
-			/* Recalculate cell sizes for remaining space, ensuring no gaps */
-			if (remaining_space.width > 0 && remaining_space.height > 0) {
-				/* Ensure we account for gaps properly - windows should fill the space */
-				int total_gap_width = (cols + 1) * rc.gap;
-				int total_gap_height = (rows + 1) * rc.gap;
+				/* Calculate remaining space after resized window */
+				int left_space = resized_left - usable.x;
+				int right_space = (usable.x + usable.width) - resized_right;
+				int top_space = resized_top - usable.y;
+				int bottom_space = (usable.y + usable.height) - resized_bottom;
 				
-				if (remaining_space.width > total_gap_width && remaining_space.height > total_gap_height) {
-					cell_width = (remaining_space.width - total_gap_width) / cols;
-					cell_height = (remaining_space.height - total_gap_height) / rows;
-					layout_area = &remaining_space;
+				/* Determine which side the adjacent windows are on */
+				/* Check where adjacent windows are positioned relative to resized window */
+				bool adjacent_on_right = false, adjacent_on_left = false;
+				bool adjacent_on_bottom = false, adjacent_on_top = false;
+				
+				struct adjacent_view_entry *adj_entry;
+				wl_list_for_each(adj_entry, &adjacent_views, link) {
+					struct view *adj_view = adj_entry->view;
+					struct border adj_margin = ssd_thickness(adj_view);
+					struct wlr_box adj_full = (struct wlr_box){
+						.x = adj_view->current.x - adj_margin.left,
+						.y = adj_view->current.y - adj_margin.top,
+						.width = adj_view->current.width + adj_margin.left + adj_margin.right,
+						.height = adj_view->current.height + adj_margin.top + adj_margin.bottom,
+					};
+					
+					if (adj_full.x >= resized_right - rc.gap - 5) {
+						adjacent_on_right = true;
+					}
+					if (adj_full.x + adj_full.width <= resized_left + rc.gap + 5) {
+						adjacent_on_left = true;
+					}
+					if (adj_full.y >= resized_bottom - rc.gap - 5) {
+						adjacent_on_bottom = true;
+					}
+					if (adj_full.y + adj_full.height <= resized_top + rc.gap + 5) {
+						adjacent_on_top = true;
+					}
+				}
+
+				/* Determine layout area for adjacent windows */
+				if (adjacent_on_right && !adjacent_on_left) {
+					/* Adjacent windows on right - use right space */
+					remaining_space.x = resized_right + rc.gap;
+					remaining_space.y = usable.y;
+					remaining_space.width = right_space - rc.gap;
+					remaining_space.height = usable.height;
+				} else if (adjacent_on_left && !adjacent_on_right) {
+					/* Adjacent windows on left - use left space */
+					remaining_space.x = usable.x;
+					remaining_space.y = usable.y;
+					remaining_space.width = left_space - rc.gap;
+					remaining_space.height = usable.height;
+				} else if (adjacent_on_bottom && !adjacent_on_top) {
+					/* Adjacent windows on bottom - use bottom space */
+					remaining_space.x = usable.x;
+					remaining_space.y = resized_bottom + rc.gap;
+					remaining_space.width = usable.width;
+					remaining_space.height = bottom_space - rc.gap;
+				} else if (adjacent_on_top && !adjacent_on_bottom) {
+					/* Adjacent windows on top - use top space */
+					remaining_space.x = usable.x;
+					remaining_space.y = usable.y;
+					remaining_space.width = usable.width;
+					remaining_space.height = top_space - rc.gap;
+				} else {
+					/* Mixed or unclear - use largest available space */
+					int left_area = left_space * usable.height;
+					int right_area = right_space * usable.height;
+					int top_area = top_space * usable.width;
+					int bottom_area = bottom_space * usable.width;
+					
+					if (right_area >= left_area && right_area >= top_area && right_area >= bottom_area && right_space > rc.gap) {
+						remaining_space.x = resized_right + rc.gap;
+						remaining_space.y = usable.y;
+						remaining_space.width = right_space - rc.gap;
+						remaining_space.height = usable.height;
+					} else if (left_area >= top_area && left_area >= bottom_area && left_space > rc.gap) {
+						remaining_space.x = usable.x;
+						remaining_space.y = usable.y;
+						remaining_space.width = left_space - rc.gap;
+						remaining_space.height = usable.height;
+					} else if (bottom_area >= top_area && bottom_space > rc.gap) {
+						remaining_space.x = usable.x;
+						remaining_space.y = resized_bottom + rc.gap;
+						remaining_space.width = usable.width;
+						remaining_space.height = bottom_space - rc.gap;
+					} else if (top_space > rc.gap) {
+						remaining_space.x = usable.x;
+						remaining_space.y = usable.y;
+						remaining_space.width = usable.width;
+						remaining_space.height = top_space - rc.gap;
+					} else {
+						remaining_space = usable;
+					}
+				}
+
+				/* Recalculate cell sizes for remaining space */
+				if (remaining_space.width > 0 && remaining_space.height > 0) {
+					int total_gap_width = (cols + 1) * rc.gap;
+					int total_gap_height = (rows + 1) * rc.gap;
+					
+					if (remaining_space.width > total_gap_width && remaining_space.height > total_gap_height) {
+						cell_width = (remaining_space.width - total_gap_width) / cols;
+						cell_height = (remaining_space.height - total_gap_height) / rows;
+						layout_area = &remaining_space;
+					} else {
+						cell_width = remaining_space.width / cols;
+						cell_height = remaining_space.height / rows;
+						layout_area = &remaining_space;
+					}
 				}
 			}
 		}
@@ -904,10 +921,202 @@ desktop_arrange_tiled(struct server *server)
 				continue;
 			}
 
-			/* Handle manually resized window separately */
+			/* If we have a resized view with adjacent windows, only process adjacent ones */
+			if (resized_view && !wl_list_empty(&adjacent_views)) {
+				/* Check if this view is in the adjacent list */
+				bool is_adjacent = false;
+				struct adjacent_view_entry *entry;
+				wl_list_for_each(entry, &adjacent_views, link) {
+					if (entry->view == view) {
+						is_adjacent = true;
+						break;
+					}
+				}
+				
+				/* Skip non-adjacent windows - they stay in their current position */
+				if (!is_adjacent && view != resized_view) {
+					continue;
+				}
+			}
+
+			/* Handle manually resized window - adjust if necessary to prevent overlaps or fill empty space */
 			if (view == resized_view) {
-				/* Preserve the resized window's geometry */
 				struct wlr_box geo = server->resized_view_geometry;
+				struct border resized_margin = ssd_thickness(resized_view);
+				struct wlr_box resized_full = (struct wlr_box){
+					.x = geo.x - resized_margin.left,
+					.y = geo.y - resized_margin.top,
+					.width = geo.width + resized_margin.left + resized_margin.right,
+					.height = geo.height + resized_margin.top + resized_margin.bottom,
+				};
+
+				/* Check for empty space around the resized window */
+				int empty_left = resized_full.x - usable.x;
+				int empty_right = (usable.x + usable.width) - (resized_full.x + resized_full.width);
+				int empty_top = resized_full.y - usable.y;
+				int empty_bottom = (usable.y + usable.height) - (resized_full.y + resized_full.height);
+
+				/* Check if there's significant empty space (more than gap) */
+				bool has_empty_space = (empty_left > rc.gap) || (empty_right > rc.gap) ||
+				                       (empty_top > rc.gap) || (empty_bottom > rc.gap);
+
+				/* Check for overlaps with other windows and adjust if necessary */
+				bool needs_adjustment = false;
+				struct view *other_view;
+				for_each_view(other_view, &server->views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+					if (other_view == resized_view || other_view->minimized ||
+					    other_view->fullscreen || view_is_always_on_top(other_view) ||
+					    view_is_always_on_bottom(other_view)) {
+						continue;
+					}
+					if (window_rules_get_property(other_view, "fixedPosition") == LAB_PROP_TRUE) {
+						continue;
+					}
+					enum property other_tile_prop = window_rules_get_property(other_view, "tile");
+					if (other_tile_prop == LAB_PROP_FALSE) {
+						continue;
+					}
+					if (other_view->output != output) {
+						continue;
+					}
+
+					/* Skip if this other view is adjacent (it will be repositioned) */
+					if (resized_view && !wl_list_empty(&adjacent_views)) {
+						bool other_is_adjacent = false;
+						struct adjacent_view_entry *entry;
+						wl_list_for_each(entry, &adjacent_views, link) {
+							if (entry->view == other_view) {
+								other_is_adjacent = true;
+								break;
+							}
+						}
+						if (other_is_adjacent) {
+							continue;
+						}
+					}
+
+					struct border other_margin = ssd_thickness(other_view);
+					struct wlr_box other_full = (struct wlr_box){
+						.x = other_view->current.x - other_margin.left,
+						.y = other_view->current.y - other_margin.top,
+						.width = other_view->current.width + other_margin.left + other_margin.right,
+						.height = other_view->current.height + other_margin.top + other_margin.bottom,
+					};
+
+					/* Check for overlap */
+					if (!(resized_full.x + resized_full.width <= other_full.x ||
+					      resized_full.x >= other_full.x + other_full.width ||
+					      resized_full.y + resized_full.height <= other_full.y ||
+					      resized_full.y >= other_full.y + other_full.height)) {
+						/* Overlap detected - adjust resized window to avoid it */
+						if (resized_full.x < other_full.x + other_full.width &&
+						    resized_full.x + resized_full.width > other_full.x) {
+							/* Horizontal overlap - adjust width */
+							if (resized_full.x < other_full.x) {
+								geo.width = other_full.x - resized_full.x - resized_margin.left - resized_margin.right;
+							} else {
+								int new_x = other_full.x + other_full.width + rc.gap;
+								geo.x = new_x + resized_margin.left;
+								geo.width = resized_full.x + resized_full.width - new_x - resized_margin.left - resized_margin.right;
+							}
+							needs_adjustment = true;
+						}
+						if (resized_full.y < other_full.y + other_full.height &&
+						    resized_full.y + resized_full.height > other_full.y) {
+							/* Vertical overlap - adjust height */
+							if (resized_full.y < other_full.y) {
+								geo.height = other_full.y - resized_full.y - resized_margin.top - resized_margin.bottom;
+							} else {
+								int new_y = other_full.y + other_full.height + rc.gap;
+								geo.y = new_y + resized_margin.top;
+								geo.height = resized_full.y + resized_full.height - new_y - resized_margin.top - resized_margin.bottom;
+							}
+							needs_adjustment = true;
+						}
+					}
+				}
+
+				/* If there's empty space and no overlaps, expand the resized window to fill it */
+				/* Only expand if there are no adjacent windows that would be affected */
+				if (has_empty_space && !needs_adjustment) {
+					/* Check if adjacent windows would prevent expansion in each direction */
+					bool can_expand_left = true, can_expand_right = true;
+					bool can_expand_top = true, can_expand_bottom = true;
+					
+					if (!wl_list_empty(&adjacent_views)) {
+						struct adjacent_view_entry *adj_entry;
+						wl_list_for_each(adj_entry, &adjacent_views, link) {
+							struct view *adj_view = adj_entry->view;
+							struct border adj_margin = ssd_thickness(adj_view);
+							struct wlr_box adj_full = (struct wlr_box){
+								.x = adj_view->current.x - adj_margin.left,
+								.y = adj_view->current.y - adj_margin.top,
+								.width = adj_view->current.width + adj_margin.left + adj_margin.right,
+								.height = adj_view->current.height + adj_margin.top + adj_margin.bottom,
+							};
+							
+							/* Check which side the adjacent window is on */
+							if (adj_full.x + adj_full.width <= resized_full.x + rc.gap) {
+								can_expand_left = false; /* Adjacent window on left */
+							}
+							if (adj_full.x >= resized_full.x + resized_full.width - rc.gap) {
+								can_expand_right = false; /* Adjacent window on right */
+							}
+							if (adj_full.y + adj_full.height <= resized_full.y + rc.gap) {
+								can_expand_top = false; /* Adjacent window on top */
+							}
+							if (adj_full.y >= resized_full.y + resized_full.height - rc.gap) {
+								can_expand_bottom = false; /* Adjacent window on bottom */
+							}
+						}
+					}
+					
+					/* Check which direction has the most empty space and can be expanded */
+					/* Prefer expanding horizontally (left/right) over vertically */
+					if (can_expand_left && empty_left >= empty_right && empty_left >= empty_top && 
+					    empty_left >= empty_bottom && empty_left > rc.gap) {
+						/* Expand left */
+						geo.x = usable.x + resized_margin.left;
+						geo.width += empty_left - resized_margin.left - resized_margin.right;
+						needs_adjustment = true;
+					} else if (can_expand_right && empty_right >= empty_top && 
+					           empty_right >= empty_bottom && empty_right > rc.gap) {
+						/* Expand right */
+						geo.width += empty_right - resized_margin.left - resized_margin.right;
+						needs_adjustment = true;
+					} else if (can_expand_top && empty_top >= empty_bottom && empty_top > rc.gap) {
+						/* Expand top */
+						geo.y = usable.y + resized_margin.top;
+						geo.height += empty_top - resized_margin.top - resized_margin.bottom;
+						needs_adjustment = true;
+					} else if (can_expand_bottom && empty_bottom > rc.gap) {
+						/* Expand bottom */
+						geo.height += empty_bottom - resized_margin.top - resized_margin.bottom;
+						needs_adjustment = true;
+					}
+				}
+
+				/* Ensure geometry is within bounds */
+				if (geo.x < usable.x) {
+					geo.width -= (usable.x - geo.x);
+					geo.x = usable.x;
+				}
+				if (geo.y < usable.y) {
+					geo.height -= (usable.y - geo.y);
+					geo.y = usable.y;
+				}
+				if (geo.x + geo.width > usable.x + usable.width) {
+					geo.width = usable.x + usable.width - geo.x;
+				}
+				if (geo.y + geo.height > usable.y + usable.height) {
+					geo.height = usable.y + usable.height - geo.y;
+				}
+
+				/* Update stored geometry if adjusted */
+				if (needs_adjustment) {
+					server->resized_view_geometry = geo;
+				}
+
 				view_move_resize(view, geo);
 				continue;
 			}
@@ -1002,6 +1211,233 @@ desktop_arrange_tiled(struct server *server)
 			}
 
 			idx++;
+		}
+
+		/* Clean up adjacent views list */
+		if (resized_view && !wl_list_empty(&adjacent_views)) {
+			struct adjacent_view_entry *entry, *tmp;
+			wl_list_for_each_safe(entry, tmp, &adjacent_views, link) {
+				wl_list_remove(&entry->link);
+				free(entry);
+			}
+		}
+	}
+
+	/* Proactively fill empty space - iterate until usable area is filled */
+	if (!server->tiling_grid_mode) {
+		const int max_iterations = 10; /* Prevent infinite loops */
+		for (int iteration = 0; iteration < max_iterations; iteration++) {
+			bool space_filled = true;
+			
+			wl_list_for_each(output, &server->outputs, link) {
+				if (!output_is_usable(output)) {
+					continue;
+				}
+
+				struct wlr_box usable = output_usable_area_in_layout_coords(output);
+				
+				/* Check for empty space by examining all tiled windows */
+				/* Find the bounding box of all tiled windows */
+				struct wlr_box occupied = {0};
+				bool has_occupied = false;
+				
+				for_each_view(view, &server->views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+					if (view->minimized || view->fullscreen ||
+					    view_is_always_on_top(view) || view_is_always_on_bottom(view)) {
+						continue;
+					}
+					if (window_rules_get_property(view, "fixedPosition") == LAB_PROP_TRUE) {
+						continue;
+					}
+					enum property tile_prop = window_rules_get_property(view, "tile");
+					if (tile_prop == LAB_PROP_FALSE) {
+						continue;
+					}
+					if (view->output != output) {
+						continue;
+					}
+
+					struct border margin = ssd_thickness(view);
+					struct wlr_box view_full = (struct wlr_box){
+						.x = view->current.x - margin.left,
+						.y = view->current.y - margin.top,
+						.width = view->current.width + margin.left + margin.right,
+						.height = view->current.height + margin.top + margin.bottom,
+					};
+
+					if (!has_occupied) {
+						occupied = view_full;
+						has_occupied = true;
+					} else {
+						/* Expand bounding box to include this window */
+						int occupied_right = occupied.x + occupied.width;
+						int occupied_bottom = occupied.y + occupied.height;
+						int view_right = view_full.x + view_full.width;
+						int view_bottom = view_full.y + view_full.height;
+						
+						if (view_full.x < occupied.x) {
+							occupied.width += occupied.x - view_full.x;
+							occupied.x = view_full.x;
+						}
+						if (view_full.y < occupied.y) {
+							occupied.height += occupied.y - view_full.y;
+							occupied.y = view_full.y;
+						}
+						if (view_right > occupied_right) {
+							occupied.width = view_right - occupied.x;
+						}
+						if (view_bottom > occupied_bottom) {
+							occupied.height = view_bottom - occupied.y;
+						}
+					}
+				}
+
+				if (!has_occupied) {
+					continue; /* No windows on this output */
+				}
+
+				/* Check for empty space around occupied area */
+				/* Account for gaps in the occupied area calculation */
+				int empty_left = occupied.x - usable.x;
+				int empty_right = (usable.x + usable.width) - (occupied.x + occupied.width);
+				int empty_top = occupied.y - usable.y;
+				int empty_bottom = (usable.y + usable.height) - (occupied.y + occupied.height);
+
+				/* Check if there's significant empty space (more than gap) */
+				if (empty_left > rc.gap || empty_right > rc.gap ||
+				    empty_top > rc.gap || empty_bottom > rc.gap) {
+					space_filled = false;
+
+					/* Find all windows that can expand to fill empty space */
+					/* Expand multiple windows in one iteration for efficiency */
+					int windows_expanded = 0;
+					
+					for_each_view(view, &server->views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
+						if (view->minimized || view->fullscreen ||
+						    view_is_always_on_top(view) || view_is_always_on_bottom(view)) {
+							continue;
+						}
+						if (window_rules_get_property(view, "fixedPosition") == LAB_PROP_TRUE) {
+							continue;
+						}
+						enum property tile_prop = window_rules_get_property(view, "tile");
+						if (tile_prop == LAB_PROP_FALSE) {
+							continue;
+						}
+						if (view->output != output) {
+							continue;
+						}
+
+						/* Skip resized view if it exists - it should maintain its size */
+						if (server->resized_view == view) {
+							continue;
+						}
+
+						struct border margin = ssd_thickness(view);
+						struct wlr_box view_full = (struct wlr_box){
+							.x = view->current.x - margin.left,
+							.y = view->current.y - margin.top,
+							.width = view->current.width + margin.left + margin.right,
+							.height = view->current.height + margin.top + margin.bottom,
+						};
+
+						struct wlr_box new_geo = view->current;
+						bool expanded = false;
+
+						/* Check if window is on left edge and can expand left */
+						if (empty_left > rc.gap && abs(view_full.x - occupied.x) <= rc.gap + 5) {
+							int expand_amount = empty_left - rc.gap;
+							new_geo.x = usable.x + margin.left;
+							new_geo.width += expand_amount;
+							expanded = true;
+						}
+						/* Check if window is on right edge and can expand right */
+						if (empty_right > rc.gap && 
+						    abs((view_full.x + view_full.width) - (occupied.x + occupied.width)) <= rc.gap + 5) {
+							int expand_amount = empty_right - rc.gap;
+							new_geo.width += expand_amount;
+							expanded = true;
+						}
+						/* Check if window is on top edge and can expand top */
+						if (empty_top > rc.gap && abs(view_full.y - occupied.y) <= rc.gap + 5) {
+							int expand_amount = empty_top - rc.gap;
+							new_geo.y = usable.y + margin.top;
+							new_geo.height += expand_amount;
+							expanded = true;
+						}
+						/* Check if window is on bottom edge and can expand bottom */
+						if (empty_bottom > rc.gap &&
+						    abs((view_full.y + view_full.height) - (occupied.y + occupied.height)) <= rc.gap + 5) {
+							int expand_amount = empty_bottom - rc.gap;
+							new_geo.height += expand_amount;
+							expanded = true;
+						}
+
+						if (expanded) {
+							/* Ensure geometry is within bounds */
+							if (new_geo.x < usable.x) {
+								new_geo.width -= (usable.x - new_geo.x);
+								new_geo.x = usable.x;
+							}
+							if (new_geo.y < usable.y) {
+								new_geo.height -= (usable.y - new_geo.y);
+								new_geo.y = usable.y;
+							}
+							if (new_geo.x + new_geo.width > usable.x + usable.width) {
+								new_geo.width = usable.x + usable.width - new_geo.x;
+							}
+							if (new_geo.y + new_geo.height > usable.y + usable.height) {
+								new_geo.height = usable.y + usable.height - new_geo.y;
+							}
+
+							view_move_resize(view, new_geo);
+							windows_expanded++;
+							
+							/* Update occupied area for next window check */
+							view_full = (struct wlr_box){
+								.x = new_geo.x - margin.left,
+								.y = new_geo.y - margin.top,
+								.width = new_geo.width + margin.left + margin.right,
+								.height = new_geo.height + margin.top + margin.bottom,
+							};
+							
+							/* Recalculate occupied area */
+							if (view_full.x < occupied.x) {
+								occupied.width += occupied.x - view_full.x;
+								occupied.x = view_full.x;
+							}
+							if (view_full.y < occupied.y) {
+								occupied.height += occupied.y - view_full.y;
+								occupied.y = view_full.y;
+							}
+							if (view_full.x + view_full.width > occupied.x + occupied.width) {
+								occupied.width = (view_full.x + view_full.width) - occupied.x;
+							}
+							if (view_full.y + view_full.height > occupied.y + occupied.height) {
+								occupied.height = (view_full.y + view_full.height) - occupied.y;
+							}
+							
+							/* Recalculate empty space */
+							empty_left = occupied.x - usable.x;
+							empty_right = (usable.x + usable.width) - (occupied.x + occupied.width);
+							empty_top = occupied.y - usable.y;
+							empty_bottom = (usable.y + usable.height) - (occupied.y + occupied.height);
+						}
+					}
+					
+					/* If we expanded windows, continue to next iteration to check for more space */
+					if (windows_expanded == 0) {
+						/* No windows could expand, but there's still empty space */
+						/* This might happen if all windows are resized views or fixed position */
+						space_filled = true; /* Give up on this output */
+					}
+				}
+			}
+
+			/* If no space was filled in this iteration, we're done */
+			if (space_filled) {
+				break;
+			}
 		}
 	}
 }

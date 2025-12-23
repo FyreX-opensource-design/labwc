@@ -2608,6 +2608,11 @@ view_destroy(struct view *view)
 	/* Remove view from server->views */
 	wl_list_remove(&view->link);
 
+	/* Clear resized_view if this was the resized window */
+	if (server->resized_view == view) {
+		server->resized_view = NULL;
+	}
+
 	/* Rearrange tiled windows when one is destroyed */
 	if (server->tiling_mode) {
 		desktop_arrange_tiled(server);

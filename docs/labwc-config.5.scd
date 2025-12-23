@@ -167,6 +167,53 @@ Elements at the same level can have the same name whereas attributes cannot.
 Therefore, where multiple objects of the same kind are required (for example
 *<action>* and *<keybind>*) the top-node of the object has to be an element.
 
+## INCLUDING OTHER XML FILES
+
+*rc.xml* supports including other XML files using the XInclude standard. This
+allows you to split your configuration into multiple files for better
+organization.
+
+To include another XML file, use the *xi:include* element with the *href*
+attribute pointing to the file to include:
+
+```
+<?xml version="1.0"?>
+<labwc_config xmlns:xi="http://www.w3.org/2001/XInclude">
+
+  <xi:include href="keybinds.xml" />
+  <xi:include href="mousebinds.xml" />
+
+  <!-- rest of configuration -->
+</labwc_config>
+```
+
+The *href* attribute can be either:
+- A relative path, resolved relative to the directory containing the current
+  *rc.xml* file
+- An absolute path
+
+Included files must contain valid XML fragments that can be inserted at the
+location of the *xi:include* element. The included content will be processed as
+if it were directly written in the main configuration file.
+
+For example, if you have a file *keybinds.xml* in the same directory as
+*rc.xml*:
+
+```
+<keyboard>
+  <keybind key="W-Return">
+    <action name="Execute">
+      <command>foot</command>
+    </action>
+  </keybind>
+</keyboard>
+```
+
+This will be included and processed as part of the main configuration.
+
+Note: XInclude processing happens before other XML parsing, so included files
+are fully merged into the document before configuration options are read.
+
 ## BOOLEANS
 
 Note that in this manual, Boolean values are listed as [yes|no] for simplicity,

@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <glib.h>
 #include <libxml/parser.h>
+#include <libxml/xinclude.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1567,14 +1568,23 @@ traverse(xmlNode *node)
 }
 
 static void
-rcxml_parse_xml(struct buf *b)
+rcxml_parse_xml(struct buf *b, const char *filename)
 {
-	int options = 0;
-	xmlDoc *d = xmlReadMemory(b->data, b->len, NULL, NULL, options);
+	int options = XML_PARSE_XINCLUDE;
+	xmlDoc *d = xmlReadMemory(b->data, b->len, filename, NULL, options);
 	if (!d) {
 		wlr_log(WLR_ERROR, "error parsing config file");
 		return;
 	}
+
+	/* Process XInclude directives */
+	int ret = xmlXIncludeProcess(d);
+	if (ret < 0) {
+		wlr_log(WLR_ERROR, "error processing XInclude directives in %s", filename ? filename : "config");
+	} else if (ret > 0) {
+		wlr_log(WLR_INFO, "processed %d XInclude directive(s) in %s", ret, filename ? filename : "config");
+	}
+
 	xmlNode *root = xmlDocGetRootElement(d);
 
 	lab_xml_expand_dotted_attributes(root);
@@ -2125,7 +2135,7 @@ rcxml_read(const char *filename)
 
 		wlr_log(WLR_INFO, "read config file %s", path->string);
 
-		rcxml_parse_xml(&b);
+		rcxml_parse_xml(&b, path->string);
 		buf_reset(&b);
 		if (!should_merge_config) {
 			break;

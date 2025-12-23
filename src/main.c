@@ -44,6 +44,7 @@ static const struct option long_options[] = {
 	{"disable-tiling", no_argument, NULL, 3001},
 	{"toggle-tiling", no_argument, NULL, 3002},
 	{"tiling-grid-mode", required_argument, NULL, 3003},
+	{"recalculate-tiling", no_argument, NULL, 3004},
 	{0, 0, 0, 0}
 };
 
@@ -70,7 +71,8 @@ static const char labwc_usage[] =
 "      --enable-tiling           Enable automatic tiling mode\n"
 "      --disable-tiling          Disable automatic tiling mode\n"
 "      --toggle-tiling           Toggle automatic tiling mode on/off\n"
-"      --tiling-grid-mode <on|off|toggle>  Set grid snapping mode (on=simple grid, off=smart resize preservation)\n";
+"      --tiling-grid-mode <on|off|toggle>  Set grid snapping mode (on=simple grid, off=smart resize preservation)\n"
+"      --recalculate-tiling      Recalculate and rearrange tiled windows\n";
 
 static void
 usage(void)
@@ -390,6 +392,9 @@ main(int argc, char *argv[])
 			exit(0);
 		case 3003: /* --tiling-grid-mode */
 			send_tiling_command("grid-mode", optarg);
+			exit(0);
+		case 3004: /* --recalculate-tiling */
+			send_tiling_command("recalculate", NULL);
 			exit(0);
 		case 'h':
 		default:

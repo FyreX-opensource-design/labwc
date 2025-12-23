@@ -223,6 +223,9 @@ process_workspace_command(struct server *server, const char *command, const char
 	update_workspace_status_file(server);
 }
 
+/* Forward declaration */
+void tiling_timer_update(struct server *server);
+
 static int
 handle_sigusr1(int signal, void *data)
 {
@@ -283,30 +286,53 @@ handle_sigusr1(int signal, void *data)
 					server->tiling_mode = true;
 					wlr_log(WLR_INFO, "Tiling mode enabled");
 					desktop_arrange_tiled(server);
+					tiling_timer_update(server);
 				} else if (!strcmp(command, "disable")) {
 					server->tiling_mode = false;
+					/* Clear resized view tracking when disabling tiling */
+					server->resized_view = NULL;
 					wlr_log(WLR_INFO, "Tiling mode disabled");
+					tiling_timer_update(server);
 				} else if (!strcmp(command, "toggle")) {
 					server->tiling_mode = !server->tiling_mode;
+					/* Clear resized view tracking when disabling tiling */
+					if (!server->tiling_mode) {
+						server->resized_view = NULL;
+					}
 					wlr_log(WLR_INFO, "Tiling mode %s",
 						server->tiling_mode ? "enabled" : "disabled");
 					if (server->tiling_mode) {
 						desktop_arrange_tiled(server);
 					}
+					tiling_timer_update(server);
 				} else if (!strcmp(command, "grid-mode")) {
 					if (!strcmp(arg, "on") || !strcmp(arg, "true") || !strcmp(arg, "1")) {
 						server->tiling_grid_mode = true;
+						/* Clear resized view tracking when enabling grid mode */
+						server->resized_view = NULL;
 						wlr_log(WLR_INFO, "Tiling grid mode enabled (simple grid snapping)");
 					} else if (!strcmp(arg, "off") || !strcmp(arg, "false") || !strcmp(arg, "0")) {
 						server->tiling_grid_mode = false;
 						wlr_log(WLR_INFO, "Tiling grid mode disabled (smart resize preservation)");
 					} else if (!strcmp(arg, "toggle")) {
 						server->tiling_grid_mode = !server->tiling_grid_mode;
+						/* Clear resized view tracking when enabling grid mode */
+						if (server->tiling_grid_mode) {
+							server->resized_view = NULL;
+						}
 						wlr_log(WLR_INFO, "Tiling grid mode %s",
 							server->tiling_grid_mode ? "enabled" : "disabled");
 					}
 					if (server->tiling_mode) {
 						desktop_arrange_tiled(server);
+					}
+					tiling_timer_update(server);
+				} else if (!strcmp(command, "recalculate")) {
+					if (server->tiling_mode) {
+						wlr_log(WLR_INFO, "Recalculating tiling layout");
+						desktop_arrange_tiled(server);
+					} else {
+						wlr_log(WLR_INFO, "Tiling mode is disabled, cannot recalculate");
 					}
 				}
 			} else if (sscanf(line, "%31s", command) == 1) {
@@ -314,15 +340,27 @@ handle_sigusr1(int signal, void *data)
 					server->tiling_mode = true;
 					wlr_log(WLR_INFO, "Tiling mode enabled");
 					desktop_arrange_tiled(server);
+					tiling_timer_update(server);
 				} else if (!strcmp(command, "disable")) {
 					server->tiling_mode = false;
+					/* Clear resized view tracking when disabling tiling */
+					server->resized_view = NULL;
 					wlr_log(WLR_INFO, "Tiling mode disabled");
+					tiling_timer_update(server);
 				} else if (!strcmp(command, "toggle")) {
 					server->tiling_mode = !server->tiling_mode;
 					wlr_log(WLR_INFO, "Tiling mode %s",
 						server->tiling_mode ? "enabled" : "disabled");
 					if (server->tiling_mode) {
 						desktop_arrange_tiled(server);
+					}
+					tiling_timer_update(server);
+				} else if (!strcmp(command, "recalculate")) {
+					if (server->tiling_mode) {
+						wlr_log(WLR_INFO, "Recalculating tiling layout");
+						desktop_arrange_tiled(server);
+					} else {
+						wlr_log(WLR_INFO, "Tiling mode is disabled, cannot recalculate");
 					}
 				}
 			}
@@ -333,6 +371,49 @@ handle_sigusr1(int signal, void *data)
 	}
 
 	return 0;
+}
+
+/* Timer callback for proactive tiling recalculation in smart resize mode */
+static int
+tiling_recalculate_timer_handler(void *data)
+{
+	struct server *server = data;
+	if (server->tiling_mode && !server->tiling_grid_mode) {
+		desktop_arrange_tiled(server);
+		/* Reschedule timer for next check (200ms) */
+		if (server->tiling_recalculate_timer) {
+			wl_event_source_timer_update(server->tiling_recalculate_timer, 200);
+		}
+		return 0;
+	}
+	/* Stop timer if conditions aren't met */
+	return 0;
+}
+
+void
+tiling_timer_update(struct server *server)
+{
+	/* Start timer if smart resize mode is enabled and no resize is in progress */
+	if (server->tiling_mode && !server->tiling_grid_mode &&
+	    server->input_mode != LAB_INPUT_STATE_RESIZE) {
+		if (!server->tiling_recalculate_timer) {
+			/* Create timer with 200ms interval */
+			server->tiling_recalculate_timer = wl_event_loop_add_timer(
+				server->wl_event_loop, tiling_recalculate_timer_handler, server);
+			if (server->tiling_recalculate_timer) {
+				wl_event_source_timer_update(server->tiling_recalculate_timer, 200);
+			}
+		} else {
+			/* Timer exists, just update it to keep it running */
+			wl_event_source_timer_update(server->tiling_recalculate_timer, 200);
+		}
+	} else {
+		/* Stop timer if smart resize mode is disabled or resize is in progress */
+		if (server->tiling_recalculate_timer) {
+			wl_event_source_remove(server->tiling_recalculate_timer);
+			server->tiling_recalculate_timer = NULL;
+		}
+	}
 }
 
 static int
@@ -637,6 +718,7 @@ server_init(struct server *server)
 	server->tiling_mode = false;
 	server->tiling_grid_mode = true; /* Default to grid mode (original behavior) */
 	server->resized_view = NULL;
+	server->tiling_recalculate_timer = NULL;
 	memset(&server->resized_view_geometry, 0, sizeof(server->resized_view_geometry));
 	server->wl_display = wl_display_create();
 	if (!server->wl_display) {
@@ -984,6 +1066,10 @@ server_finish(struct server *server)
 	wl_event_source_remove(server->sigterm_source);
 	wl_event_source_remove(server->sigchld_source);
 	wl_event_source_remove(server->sigusr1_source);
+	if (server->tiling_recalculate_timer) {
+		wl_event_source_remove(server->tiling_recalculate_timer);
+		server->tiling_recalculate_timer = NULL;
+	}
 
 	wl_display_destroy_clients(server->wl_display);
 

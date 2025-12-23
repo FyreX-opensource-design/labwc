@@ -147,6 +147,11 @@ interactive_begin(struct view *view, enum input_mode mode, enum lab_edge edges)
 	server->resize_edges = edges;
 
 	seat_focus_override_begin(seat, mode, cursor_shape);
+	
+	/* Disable timer during resize operations */
+	if (mode == LAB_INPUT_STATE_RESIZE) {
+		tiling_timer_update(server);
+	}
 
 	/*
 	 * Un-tile maximized/tiled view immediately if <unSnapThreshold> is
@@ -329,6 +334,10 @@ interactive_finish(struct view *view)
 			/* Check if this view should be tiled */
 			enum property tile_prop = window_rules_get_property(view, "tile");
 			if (tile_prop != LAB_PROP_FALSE) {
+				/* If this was the resized view, clear it since we're moving it */
+				if (view->server->resized_view == view) {
+					view->server->resized_view = NULL;
+				}
 				/* If window was snapped, untile it first */
 				if (was_snapped && view_is_tiled(view)) {
 					view_set_untiled(view);
@@ -348,6 +357,7 @@ interactive_finish(struct view *view)
 				/* In smart mode (grid_mode=false), preserve the resized window's geometry */
 				if (!view->server->tiling_grid_mode) {
 					/* Store the resized window's current geometry to preserve it */
+					/* Use current geometry as it reflects what's actually displayed */
 					view->server->resized_view_geometry = view->current;
 					view->server->resized_view = view;
 					/* Untile the resized window so it can keep its new size */
@@ -357,15 +367,18 @@ interactive_finish(struct view *view)
 				}
 				/* Arrange all windows - this will preserve the resized one in smart mode */
 				desktop_arrange_tiled(view->server);
-				/* Clear the resized view tracking after arrangement */
-				if (!view->server->tiling_grid_mode) {
-					view->server->resized_view = NULL;
-				}
+				/* Don't clear resized_view here - keep it persistent so it's preserved
+				 * when other windows are created/destroyed/moved later */
 			}
 		}
 	}
 
 	interactive_cancel(view);
+	
+	/* Re-enable timer after resize/move completes (input_mode is now PASSTHROUGH) */
+	if (view->server->tiling_mode && !view->server->tiling_grid_mode) {
+		tiling_timer_update(view->server);
+	}
 }
 
 /*

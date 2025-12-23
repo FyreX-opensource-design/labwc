@@ -330,6 +330,8 @@ struct server {
 	/* Track manually resized window to preserve its size during rearrangement */
 	struct view *resized_view;
 	struct wlr_box resized_view_geometry;
+	/* Timer for proactive tiling recalculation in smart resize mode */
+	struct wl_event_source *tiling_recalculate_timer;
 };
 
 void xdg_popup_create(struct view *view, struct wlr_xdg_popup *wlr_popup);
@@ -372,6 +374,7 @@ void desktop_focus_view_or_surface(struct seat *seat, struct view *view,
 void desktop_arrange_all_views(struct server *server);
 void desktop_arrange_tiled(struct server *server);
 void desktop_focus_output(struct output *output);
+void tiling_timer_update(struct server *server);
 
 /**
  * Toggles the (output local) visibility of the layershell top layer
