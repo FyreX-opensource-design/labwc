@@ -46,6 +46,8 @@ static const struct option long_options[] = {
 	{"tiling-grid-mode", required_argument, NULL, 3003},
 	{"recalculate-tiling", no_argument, NULL, 3004},
 	{"tiling-status", no_argument, NULL, 3005},
+	{"virtual-output-add", required_argument, NULL, 4000},
+	{"virtual-output-remove", optional_argument, NULL, 4001},
 	{0, 0, 0, 0}
 };
 
@@ -74,7 +76,9 @@ static const char labwc_usage[] =
 "      --toggle-tiling           Toggle automatic tiling mode on/off\n"
 "      --tiling-grid-mode <on|off|toggle>  Set grid snapping mode (on=simple grid, off=smart resize preservation)\n"
 "      --recalculate-tiling      Recalculate and rearrange tiled windows\n"
-"      --tiling-status           Query the current tiling mode (stacking/grid/smart)\n";
+"      --tiling-status           Query the current tiling mode (stacking/grid/smart)\n"
+"      --virtual-output-add <name>    Create a virtual output with the specified name\n"
+"      --virtual-output-remove [name] Remove a virtual output (by name, or last if no name provided)\n";
 
 static void
 usage(void)
@@ -234,6 +238,41 @@ send_workspace_command(const char *command, const char *arg)
 
 	char cmd_file[256];
 	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-workspace-cmd", runtime_dir);
+
+	FILE *f = fopen(cmd_file, "w");
+	if (!f) {
+		perror("Failed to open command file");
+		exit(EXIT_FAILURE);
+	}
+
+	if (arg) {
+		fprintf(f, "%s %s\n", command, arg);
+	} else {
+		fprintf(f, "%s\n", command);
+	}
+	fclose(f);
+
+	/* Trigger the running instance to process the command */
+	send_signal_to_labwc_pid(SIGUSR1);
+}
+
+static void
+send_virtual_output_command(const char *command, const char *arg)
+{
+	char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+	if (!runtime_dir) {
+		fprintf(stderr, "XDG_RUNTIME_DIR not set\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char *labwc_pid = getenv("LABWC_PID");
+	if (!labwc_pid) {
+		fprintf(stderr, "LABWC_PID not set - labwc is not running\n");
+		exit(EXIT_FAILURE);
+	}
+
+	char cmd_file[256];
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-virtual-output-cmd", runtime_dir);
 
 	FILE *f = fopen(cmd_file, "w");
 	if (!f) {
@@ -437,6 +476,12 @@ main(int argc, char *argv[])
 		case 3005: /* --tiling-status */
 			query_tiling_status();
 			break;
+		case 4000: /* --virtual-output-add */
+			send_virtual_output_command("add", optarg);
+			exit(0);
+		case 4001: /* --virtual-output-remove */
+			send_virtual_output_command("remove", optarg);
+			exit(0);
 		case 'h':
 		default:
 			usage();

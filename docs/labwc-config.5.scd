@@ -918,7 +918,7 @@ References:
 
 	For example, to only activate a keybind when the environment variable
 	STICKY_KEYS is set to "true", use:
-	```xml
+	```
 	<keybind key="e" conditionCommand="echo $STICKY_KEYS" conditionValues="true">
 		<action name="Execute">
 			<command>notify-send test</command>

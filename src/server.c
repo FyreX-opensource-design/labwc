@@ -249,6 +249,29 @@ process_workspace_command(struct server *server, const char *command, const char
 	update_workspace_status_file(server);
 }
 
+static void
+process_virtual_output_command(struct server *server, const char *command, const char *arg)
+{
+	if (!strcmp(command, "add")) {
+		if (!arg) {
+			wlr_log(WLR_ERROR, "virtual-output-add command requires a name argument");
+			return;
+		}
+		output_virtual_add(server, arg, NULL);
+		wlr_log(WLR_INFO, "Added virtual output '%s'", arg);
+	} else if (!strcmp(command, "remove")) {
+		output_virtual_remove(server, arg);
+		if (arg) {
+			wlr_log(WLR_INFO, "Removed virtual output '%s'", arg);
+		} else {
+			wlr_log(WLR_INFO, "Removed last virtual output");
+		}
+	} else {
+		wlr_log(WLR_ERROR, "Unknown virtual output command: %s", command);
+		return;
+	}
+}
+
 /* Forward declaration */
 void tiling_timer_update(struct server *server);
 
@@ -402,6 +425,27 @@ handle_sigusr1(int signal, void *data)
 					update_tiling_status_file(server);
 					wlr_log(WLR_INFO, "Tiling status updated");
 				}
+			}
+		}
+		fclose(f);
+		unlink(cmd_file);
+		return 0;
+	}
+
+	/* Check for virtual output command */
+	snprintf(cmd_file, sizeof(cmd_file), "%s/labwc-virtual-output-cmd", runtime_dir);
+
+	f = fopen(cmd_file, "r");
+	if (f) {
+		char line[288];
+		if (fgets(line, sizeof(line), f)) {
+			char command[32];
+			char arg[256];
+			/* Try to read command with optional argument */
+			if (sscanf(line, "%31s %255s", command, arg) == 2) {
+				process_virtual_output_command(server, command, arg);
+			} else if (sscanf(line, "%31s", command) == 1) {
+				process_virtual_output_command(server, command, NULL);
 			}
 		}
 		fclose(f);
