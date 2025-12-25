@@ -199,7 +199,7 @@ if dep_cmocka.found()
 endif
 
 executable(
-  meson.project_name(),
+  'LabFyre',
   labwc_sources,
   include_directories: [labwc_inc],
   dependencies: labwc_deps,
@@ -208,6 +208,7 @@ executable(
 )
 
 install_data('data/labwc.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
+install_data('data/labfyre.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
 
 install_data('data/labwc-portals.conf', install_dir: get_option('datadir') / 'xdg-desktop-portal')
 

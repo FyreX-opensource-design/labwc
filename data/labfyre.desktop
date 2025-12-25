@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=LabFyre
+Comment=A wayland stacking and tiling compositor
+Exec=LabFyre
+Icon=labwc
+Type=Application
+DesktopNames=labfyre;wlroots
+
