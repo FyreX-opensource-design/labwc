@@ -1,5 +1,5 @@
 # Maintainer: Nathan Sasser <fyrexdesign@outlook.com>
-pkgname=labfyre
+pkgname=labfyre-git
 pkgver=0.9.2.r129.ff2d0978
 pkgrel=1
 pkgdesc="A wayland stacking and tiling compositor (Labwc fork)"
