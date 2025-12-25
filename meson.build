@@ -207,7 +207,6 @@ executable(
   link_args: link_args,
 )
 
-install_data('data/labwc.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
 install_data('data/labfyre.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
 
 install_data('data/labwc-portals.conf', install_dir: get_option('datadir') / 'xdg-desktop-portal')
