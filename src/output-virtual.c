@@ -8,12 +8,14 @@
 #include "common/string-helpers.h"
 #include "labwc.h"
 #include "output.h"
+#include "output-state.h"
 
 static struct wlr_output *fallback_output = NULL;
 
 void
 output_virtual_add(struct server *server, const char *output_name,
-		struct wlr_output **store_wlr_output)
+		struct wlr_output **store_wlr_output, int width, int height,
+		int32_t refresh)
 {
 	if (output_name) {
 		/* Prevent creating outputs with the same name */
@@ -26,6 +28,14 @@ output_virtual_add(struct server *server, const char *output_name,
 				return;
 			}
 		}
+	}
+
+	/* Default to 1920x1080 if not specified */
+	if (width <= 0) {
+		width = 1920;
+	}
+	if (height <= 0) {
+		height = 1080;
 	}
 
 	/*
@@ -52,7 +62,7 @@ output_virtual_add(struct server *server, const char *output_name,
 	wl_list_remove(&server->new_output.link);
 
 	struct wlr_output *wlr_output = wlr_headless_add_output(
-		server->headless.backend, 1920, 1080);
+		server->headless.backend, width, height);
 
 	if (!wlr_output) {
 		wlr_log(WLR_ERROR, "Failed to create virtual output %s",
@@ -71,6 +81,28 @@ output_virtual_add(struct server *server, const char *output_name,
 	/* Notify about the new output manually */
 	if (server->new_output.notify) {
 		server->new_output.notify(&server->new_output, wlr_output);
+	}
+
+	/*
+	 * If a custom refresh rate was specified, set it on the output.
+	 * The output structure should now exist after the handler was called.
+	 */
+	if (refresh > 0 || (width > 0 && height > 0)) {
+		struct output *output = output_from_wlr_output(server, wlr_output);
+		if (output) {
+			/* Update the pending state with custom mode */
+			wlr_output_state_set_custom_mode(&output->pending,
+				width, height, refresh);
+			wlr_output_state_set_enabled(&output->pending, true);
+			/* Commit the custom mode */
+			if (output_state_commit(output)) {
+				wlr_log(WLR_DEBUG, "Set custom mode %dx%d@%dHz for virtual output %s",
+					width, height, refresh, output_name ? output_name : "");
+			} else {
+				wlr_log(WLR_ERROR, "Failed to set custom mode %dx%d@%dHz for virtual output %s",
+					width, height, refresh, output_name ? output_name : "");
+			}
+		}
 	}
 
 restore_handler:
@@ -118,7 +150,8 @@ output_virtual_update_fallback(struct server *server)
 			&& !string_null_or_empty(fallback_output_name)) {
 		wlr_log(WLR_DEBUG, "adding fallback output %s", fallback_output_name);
 
-		output_virtual_add(server, fallback_output_name, &fallback_output);
+		output_virtual_add(server, fallback_output_name, &fallback_output,
+				0, 0, 0);
 	} else if (fallback_output && (wl_list_length(layout_outputs) > 1
 			|| string_null_or_empty(fallback_output_name))) {
 		wlr_log(WLR_DEBUG, "destroying fallback output %s",

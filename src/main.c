@@ -77,7 +77,8 @@ static const char labwc_usage[] =
 "      --tiling-grid-mode <on|off|toggle>  Set grid snapping mode (on=simple grid, off=smart resize preservation)\n"
 "      --recalculate-tiling      Recalculate and rearrange tiled windows\n"
 "      --tiling-status           Query the current tiling mode (stacking/grid/smart)\n"
-"      --virtual-output-add <name>    Create a virtual output with the specified name\n"
+"      --virtual-output-add <name[:WIDTHxHEIGHT[@REFRESH]]>  Create a virtual output\n"
+"                                                             (e.g., ScreenCasting:1920x1080@60)\n"
 "      --virtual-output-remove [name] Remove a virtual output (by name, or last if no name provided)\n";
 
 static void

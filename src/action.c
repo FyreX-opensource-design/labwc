@@ -1474,7 +1474,7 @@ run_action(struct view *view, struct server *server, struct action *action,
 		const char *output_name =
 			action_get_str(action, "output_name", NULL);
 		output_virtual_add(server, output_name,
-				/*store_wlr_output*/ NULL);
+				/*store_wlr_output*/ NULL, 0, 0, 0);
 		break;
 	}
 	case ACTION_TYPE_VIRTUAL_OUTPUT_REMOVE: {

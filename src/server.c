@@ -250,15 +250,72 @@ process_workspace_command(struct server *server, const char *command, const char
 }
 
 static void
+parse_resolution(const char *str, int *width, int *height, int32_t *refresh)
+{
+	*width = 0;
+	*height = 0;
+	*refresh = 0;
+
+	if (!str || !str[0]) {
+		return;
+	}
+
+	/* Parse format: WIDTHxHEIGHT@REFRESH or WIDTHxHEIGHT */
+	int w, h;
+	int32_t r = 0;
+	if (sscanf(str, "%dx%d@%d", &w, &h, &r) == 3) {
+		*width = w;
+		*height = h;
+		*refresh = r;
+	} else if (sscanf(str, "%dx%d", &w, &h) == 2) {
+		*width = w;
+		*height = h;
+		*refresh = 0;
+	}
+}
+
+static void
 process_virtual_output_command(struct server *server, const char *command, const char *arg)
 {
 	if (!strcmp(command, "add")) {
 		if (!arg) {
-			wlr_log(WLR_ERROR, "virtual-output-add command requires a name argument");
+			wlr_log(WLR_ERROR, "virtual-output-add command requires arguments");
 			return;
 		}
-		output_virtual_add(server, arg, NULL);
-		wlr_log(WLR_INFO, "Added virtual output '%s'", arg);
+
+		/* Parse: "name:WIDTHxHEIGHT@REFRESH" or "name:WIDTHxHEIGHT" or just "name" */
+		char *arg_copy = strdup(arg);
+		if (!arg_copy) {
+			wlr_log(WLR_ERROR, "Failed to allocate memory");
+			return;
+		}
+
+		char *name = arg_copy;
+		char *resolution_str = NULL;
+		char *colon = strchr(arg_copy, ':');
+		if (colon) {
+			*colon = '\0';
+			resolution_str = colon + 1;
+		}
+
+		int width = 0, height = 0;
+		int32_t refresh = 0;
+		if (resolution_str) {
+			parse_resolution(resolution_str, &width, &height, &refresh);
+		}
+
+		output_virtual_add(server, name[0] ? name : NULL, NULL, width, height, refresh);
+		if (refresh > 0) {
+			wlr_log(WLR_INFO, "Added virtual output '%s' with resolution %dx%d@%dHz",
+				name[0] ? name : "(unnamed)", width, height, refresh);
+		} else if (width > 0 && height > 0) {
+			wlr_log(WLR_INFO, "Added virtual output '%s' with resolution %dx%d",
+				name[0] ? name : "(unnamed)", width, height);
+		} else {
+			wlr_log(WLR_INFO, "Added virtual output '%s'", name[0] ? name : "(unnamed)");
+		}
+
+		free(arg_copy);
 	} else if (!strcmp(command, "remove")) {
 		output_virtual_remove(server, arg);
 		if (arg) {
