@@ -11,17 +11,17 @@ name: CI
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'meson.build'
-      - 'meson_options.txt'
-      - 'src/**'
-      - 'include/**'
-      - 'protocols/**'
-      - 'clients/**'
-      - 't/**'
-      - 'scripts/**'
-      - '.github/workflows/**'
+  # pull_request:
+  #   paths:
+  #     - 'meson.build'
+  #     - 'meson_options.txt'
+  #     - 'src/**'
+  #     - 'include/**'
+  #     - 'protocols/**'
+  #     - 'clients/**'
+  #     - 't/**'
+  #     - 'scripts/**'
+  #     - '.github/workflows/**'
 
 jobs:
   # codestyle:
@@ -36,7 +36,7 @@ jobs:
   #         ./scripts/find-banned.sh
   build:
     name: Build
-    needs: codestyle
+    # needs: codestyle
     timeout-minutes: 10
     strategy:
       fail-fast: false
