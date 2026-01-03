@@ -10,6 +10,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'meson.build'
